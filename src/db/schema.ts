@@ -124,6 +124,7 @@ export const adEvents = pgTable('ad_events', {
   slot: text('slot'),
 }, (t) => ({
   typeCheck: check('ad_events_type_check', sql`${t.eventType} IN ('impression','click')`),
+  adTsIdx: index('ad_events_ad_ts_idx').using('brin', t.adId, t.ts),
 }));
 
 export const reviewLogs = pgTable('review_logs', {
