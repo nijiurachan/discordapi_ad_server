@@ -9,7 +9,7 @@ describe('/health', () => {
       status: string;
       service: string;
       time: string;
-      checks: { db: string };
+      checks: { db: string; s3?: string };
     };
     expect(body.service).toBe('discordapi_ad_server');
     expect(['ok', 'degraded']).toContain(body.status);
