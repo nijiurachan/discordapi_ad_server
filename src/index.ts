@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import type { Bindings } from './env.ts';
 import { health } from './health.ts';
+import { interactions } from './interactions/router.ts';
 
 const app = new Hono<{ Bindings: Bindings }>();
 
 app.route('/health', health);
+app.route('/interactions', interactions);
 
 app.get('/', (c) => c.text('discordapi_ad_server'));
 
