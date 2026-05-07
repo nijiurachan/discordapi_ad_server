@@ -584,6 +584,7 @@ export const adEvents = pgTable('ad_events', {
   slot: text('slot'),
 }, (t) => ({
   typeCheck: check('ad_events_type_check', sql`${t.eventType} IN ('impression','click')`),
+  adTsIdx: index('ad_events_ad_ts_idx').using('brin', t.adId, t.ts),
 }));
 
 export const reviewLogs = pgTable('review_logs', {
@@ -635,15 +636,19 @@ export const dmFallbackChannels = pgTable('dm_fallback_channels', {
 
 - [ ] **Step 2: `drizzle.config.ts` を作成**
 
+`process.env` への直接プロパティアクセスは TS の `noPropertyAccessFromIndexSignature` と biome の `useLiteralKeys` の両方に引っかかるため、destructuring で取り出す。
+
 ```ts
 import { defineConfig } from 'drizzle-kit';
+
+const { POSTGRES_URL } = process.env;
 
 export default defineConfig({
   schema: './src/db/schema.ts',
   out: './migrations',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.POSTGRES_URL ?? 'postgres://localhost/discordadserver',
+    url: POSTGRES_URL ?? 'postgres://localhost/discordadserver',
   },
   strict: true,
   verbose: true,
