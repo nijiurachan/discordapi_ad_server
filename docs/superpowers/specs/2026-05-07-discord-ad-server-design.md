@@ -369,19 +369,98 @@ CREATE TABLE system_settings (
         無ければ ephemeral 拒否
      2. ads.status を WHERE status='pending' で楽観ロック UPDATE
         既に処理済なら ephemeral「他のレビュアーが処理しました」
-     3a. Approve:
+
+     3a. Approve（理由入力なしでそのまま確定）:
         - sponsor の現在 Tier weight → ads.weight_snapshot
         - status='approved', starts_at=now(), reviewed_by/at
         - review_logs INSERT
         - 元 Embed を「✅ 承認済 by @reviewer」に編集
-        - 起稿者に DM「承認されました、配信開始」
-     3b. Reject:
-        - レビュアーへ Modal を返し reject_reason 入力
-        - status='rejected', reject_reason, reviewed_by/at
-        - review_logs INSERT
+        - sendResultDM(ad, 'approved') を実行（後述）
+
+     3b. Reject（理由必須）:
+        - レビュアーへ Modal を返す:
+            ┌───────────────────────────────────┐
+            │ ❌ 却下理由（必須）                │
+            │ ┌───────────────────────────────┐ │
+            │ │ (paragraph, 10〜500 字)        │ │
+            │ │                               │ │
+            │ └───────────────────────────────┘ │
+            │ ※ この理由は起稿者に DM で通知されます │
+            └───────────────────────────────────┘
+        - Modal の reject_reason は **required=true, min_length=10, max_length=500**
+        - 空文字・10字未満は Discord 側で送信不可（クライアントブロック）
+        - サーバ側でも改めて長さ検証、不足なら ephemeral 「理由は10字以上で入力してください」
+        - status='rejected', reject_reason, reviewed_by/at を更新
+        - review_logs INSERT (action='rejected', reason=reject_reason)
         - Embed を「❌ 却下 by @reviewer / 理由: ...」に編集
-        - 起稿者に DM「却下されました: <理由>」
+        - sendResultDM(ad, 'rejected', reject_reason) を実行（後述）
 ```
+
+### 4.5.1 起稿者への DM 通知（承認・却下共通）
+
+承認・却下のどちらの場合も、起稿者の Discord アカウントへ **必ず** DM を送信する。house / placeholder（sponsor_id NULL）は対象外。
+
+**DM の送信フロー**
+
+```
+sendResultDM(ad, action, reject_reason?)
+  1. Discord REST  POST /users/@me/channels  body: {recipient_id: ad.sponsor_id}
+     → DM チャンネル ID を取得（既に開いていれば既存 ID が返る）
+  2. POST /channels/{dm_channel_id}/messages  body: {embeds: [...]}
+  3. レスポンスが 403 (Cannot send messages to this user) の場合のフォールバック:
+     a. ads テーブルに dm_delivery_status を更新 ('failed')
+     b. #広告起稿 チャンネルに **メンション付き ephemeral ではないメッセージ**で通知
+        例: "<@sponsor_id> 審査結果が出ました（DM をオフにされているためここで通知）"
+        + 結果 Embed を同じメッセージに添付
+     c. admin_logs に記録（action='dm_failed_fallback'）
+```
+
+**DM Embed のフォーマット**
+
+承認時:
+
+```
+✅ 広告が承認されました
+
+タイトル: <title>
+スロット: <slot>
+広告 ID: <id>
+配信開始: <starts_at>
+重み (weight): <weight_snapshot>
+
+統計や取り下げは #広告起稿 の「📋 自分の広告一覧」から確認できます。
+```
+
+却下時:
+
+```
+❌ 広告が却下されました
+
+タイトル: <title>
+スロット: <slot>
+広告 ID: <id>
+却下日時: <reviewed_at>
+
+却下理由:
+> <reject_reason>
+
+修正のうえ再起稿してください。質問は審査者にメンションで問い合わせ可能です。
+```
+
+**追加スキーマ**
+
+```sql
+ALTER TABLE ads
+  ADD COLUMN dm_delivery_status TEXT
+    CHECK (dm_delivery_status IN ('pending','sent','failed','fallback_posted')),
+  ADD COLUMN dm_delivered_at    TIMESTAMPTZ;
+```
+
+承認/却下確定の時点で `dm_delivery_status='pending'` を立て、DM 送信成功で `'sent'`、失敗で `'failed'`、フォールバック投稿後に `'fallback_posted'` に遷移。
+
+**再送機能**
+
+DM 失敗時、管理者は #広告管理 の `📜 全広告一覧` から該当広告を選択 → `🔁 DM 再送信` ボタンで再試行できる。
 
 ### 4.6 #広告管理 の常設メニュー
 
@@ -756,6 +835,7 @@ discordapi_ad_server/
 | Cron（draft 掃除 / expire / salt rot / event 削除） | ✅ | |
 | `/admin submit`（管理者起稿、weight/sponsor 代行/auto_approve） | ✅ | |
 | プレースホルダー広告（kind='placeholder' / 募集中表示） | ✅ | |
+| 審査結果 DM（承認/却下とも、却下理由必須・DM 失敗時のチャンネル fallback） | ✅ | DM 再送 UI |
 | 複数 slot 運用 | スキーマのみ | UI 整備 |
 | 期間予約（未来 starts_at） | スキーマのみ | UI 追加 |
 | Tier ロール変更の自動反映 | lazy refresh | Cron 同期 |
