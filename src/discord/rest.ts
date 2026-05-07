@@ -1,4 +1,4 @@
-const BASE_URL = "https://discord.com/api/v10";
+const BASE_URL = 'https://discord.com/api/v10';
 
 export class DiscordRestError extends Error {
   constructor(
@@ -6,7 +6,7 @@ export class DiscordRestError extends Error {
     public readonly bodyText: string,
   ) {
     super(`Discord API error ${status}: ${bodyText.slice(0, 200)}`);
-    this.name = "DiscordRestError";
+    this.name = 'DiscordRestError';
   }
 }
 
@@ -19,7 +19,7 @@ type Json = Record<string, unknown>;
 
 async function request<T>(
   opts: Required<DiscordRestOptions>,
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   path: string,
   body?: Json,
 ): Promise<T> {
@@ -27,7 +27,7 @@ async function request<T>(
     method,
     headers: {
       Authorization: `Bot ${opts.token}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
   };
   if (body) init.body = JSON.stringify(body);
@@ -43,16 +43,16 @@ export type Message = { id: string; channel_id: string };
 export function createDiscordRest(o: DiscordRestOptions) {
   const opts = { token: o.token, fetch: o.fetch ?? fetch };
   return {
-    getChannel: (id: string) => request<Channel>(opts, "GET", `/channels/${id}`),
-    deleteChannel: (id: string) => request<void>(opts, "DELETE", `/channels/${id}`),
+    getChannel: (id: string) => request<Channel>(opts, 'GET', `/channels/${id}`),
+    deleteChannel: (id: string) => request<void>(opts, 'DELETE', `/channels/${id}`),
     createDmChannel: (recipientId: string) =>
-      request<Channel>(opts, "POST", "/users/@me/channels", { recipient_id: recipientId }),
+      request<Channel>(opts, 'POST', '/users/@me/channels', { recipient_id: recipientId }),
     createMessage: (channelId: string, body: Json) =>
-      request<Message>(opts, "POST", `/channels/${channelId}/messages`, body),
+      request<Message>(opts, 'POST', `/channels/${channelId}/messages`, body),
     editMessage: (channelId: string, messageId: string, body: Json) =>
-      request<Message>(opts, "PATCH", `/channels/${channelId}/messages/${messageId}`, body),
+      request<Message>(opts, 'PATCH', `/channels/${channelId}/messages/${messageId}`, body),
     createGuildChannel: (guildId: string, body: Json) =>
-      request<Channel>(opts, "POST", `/guilds/${guildId}/channels`, body),
+      request<Channel>(opts, 'POST', `/guilds/${guildId}/channels`, body),
   };
 }
 
