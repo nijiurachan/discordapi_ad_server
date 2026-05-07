@@ -161,6 +161,7 @@ trim_trailing_whitespace = false
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "noEmit": true,
     "jsx": "react-jsx",
