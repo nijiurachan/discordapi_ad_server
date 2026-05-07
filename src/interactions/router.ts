@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import type { Bindings } from '../env.ts';
-import { verifyDiscordSignature } from '../discord/verify.ts';
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
+import { verifyDiscordSignature } from '../discord/verify.ts';
+import type { Bindings } from '../env.ts';
 
 export const interactions = new Hono<{ Bindings: Bindings }>();
 

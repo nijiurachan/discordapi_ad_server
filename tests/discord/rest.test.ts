@@ -13,7 +13,10 @@ describe('createDiscordRest', () => {
     const rest = createDiscordRest({ token: 'tkn', fetch: fetchMock });
     const ch = await rest.getChannel('123');
     expect(ch.id).toBe('c1');
-    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) throw new Error('expected fetch to have been called');
+    const [url, init] = firstCall;
     expect(url).toBe('https://discord.com/api/v10/channels/123');
     expect((init as RequestInit).headers).toMatchObject({
       Authorization: 'Bot tkn',
