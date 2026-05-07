@@ -10,6 +10,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -25,6 +26,8 @@ export const tiers = pgTable(
   },
   (t) => ({
     weightCheck: check('tiers_weight_positive', sql`${t.weight} > 0`),
+    maxActivePositive: check('tiers_max_active_ads_positive', sql`${t.maxActiveAds} > 0`),
+    rankUnique: unique('tiers_rank_unique').on(t.rank),
   }),
 );
 
@@ -78,6 +81,10 @@ export const ads = pgTable(
       sql`(${t.kind} = 'regular' AND ${t.sponsorId} IS NOT NULL)
      OR (${t.kind} IN ('house','placeholder') AND ${t.sponsorId} IS NULL)`,
     ),
+    periodCheck: check(
+      'ads_period_check',
+      sql`${t.startsAt} IS NULL OR ${t.endsAt} IS NULL OR ${t.startsAt} <= ${t.endsAt}`,
+    ),
     activeIdx: index('ads_active_idx')
       .on(t.status, t.kind, t.slot, t.startsAt, t.endsAt)
       .where(sql`${t.status} = 'approved'`),
@@ -108,7 +115,9 @@ export const adFormatRules = pgTable('ad_format_rules', {
 
 export const adDrafts = pgTable('ad_drafts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  sponsorId: text('sponsor_id').notNull(),
+  sponsorId: text('sponsor_id')
+    .notNull()
+    .references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
   slot: text('slot').notNull(),
   imageKey: text('image_key').notNull(),
   imageMime: text('image_mime').notNull(),
@@ -134,7 +143,8 @@ export const adEvents = pgTable(
   },
   (t) => ({
     typeCheck: check('ad_events_type_check', sql`${t.eventType} IN ('impression','click')`),
-    adTsIdx: index('ad_events_ad_ts_idx').using('brin', t.adId, t.ts),
+    adIdTsIdx: index('ad_events_ad_id_ts_idx').using('btree', t.adId, t.ts),
+    tsIdx: index('ad_events_ts_idx').using('brin', t.ts),
   }),
 );
 
@@ -183,7 +193,9 @@ export const dmFallbackChannels = pgTable(
     adId: uuid('ad_id')
       .notNull()
       .references(() => ads.id),
-    sponsorId: text('sponsor_id').notNull(),
+    sponsorId: text('sponsor_id')
+      .notNull()
+      .references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
     channelId: text('channel_id').notNull().unique(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

@@ -10,10 +10,11 @@ interactions.post('/', async (c) => {
   const ts = c.req.header('X-Signature-Timestamp');
   if (!sig || !ts) return c.text('missing signature headers', 401);
 
-  // テスト時のみ public key を上書き可。本番環境では env を信頼する。
+  // 公開鍵の上書きは TEST_OVERRIDE_ALLOWED='true' の binding がある時のみ許可。
+  // 本番環境ではこの binding は未設定であり、override ヘッダは無視される。
   const override = c.req.header('X-Public-Key-Override');
   const publicKeyHex =
-    c.env.DISCORD_PUBLIC_KEY === '0'.repeat(64) && override ? override : c.env.DISCORD_PUBLIC_KEY;
+    c.env.TEST_OVERRIDE_ALLOWED === 'true' && override ? override : c.env.DISCORD_PUBLIC_KEY;
 
   const body = await c.req.text();
   const ok = await verifyDiscordSignature({
@@ -24,7 +25,13 @@ interactions.post('/', async (c) => {
   });
   if (!ok) return c.text('invalid signature', 401);
 
-  const payload = JSON.parse(body) as { type: number };
+  let payload: { type: number };
+  try {
+    payload = JSON.parse(body) as { type: number };
+  } catch {
+    return c.json({ error: 'Bad Request' }, 400);
+  }
+
   if (payload.type === InteractionType.PING) {
     return c.json({ type: InteractionResponseType.PONG });
   }

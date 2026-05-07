@@ -15,6 +15,13 @@
       "when": 1778154368951,
       "tag": "0001_add_brin_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778158393442,
+      "tag": "0002_constraints",
+      "breakpoints": true
     }
   ]
 }

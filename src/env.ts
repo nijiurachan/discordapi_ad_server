@@ -19,4 +19,5 @@ export type Bindings = {
   SITE_API_KEY?: string;
   IP_HASH_SALT_BOOTSTRAP: string;
   WORKER_BASE_URL: string;
+  TEST_OVERRIDE_ALLOWED?: string;
 };

@@ -1,7 +1,8 @@
 // Usage: tsx scripts/register-commands.ts
 //
-// Reads env from .env (or .dev.vars) and registers slash commands to a guild.
-// In P1 this only registers a placeholder /ping command for liveness testing.
+// Registers slash commands to a guild via Discord REST API.
+// Required env vars must be exported in the shell or sourced from .dev.vars
+// before running (this script does not load any .env file itself).
 
 import process from 'node:process';
 
