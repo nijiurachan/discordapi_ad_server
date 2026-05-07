@@ -1,0 +1,658 @@
+# discordapi_ad_server 設計仕様書
+
+| 項目 | 値 |
+|---|---|
+| Project | `nijiurachan/discordapi_ad_server` |
+| Created | 2026-05-07 |
+| Status | Draft (brainstorming completed, awaiting plan) |
+| Authors | So4246la |
+
+## 1. 目的とユースケース
+
+Discord サーバーを軸にしたスポンサー支援型の広告配信プラットフォーム。
+
+### 主要ユーザーロール
+
+| ロール | 主な操作 |
+|---|---|
+| **スポンサー** | 起稿（Discord に支援金額連動の Server Role を保有） |
+| **審査者** | Discord 上で承認/却下（審査ロール保持者） |
+| **管理者** | ティア・入稿ルール・ハウス広告・統計を Discord 上で全管理（管理ロール保持者） |
+| **エンドユーザー** | Web サイトで広告を閲覧・クリック |
+
+### 配信フロー
+
+1. スポンサーが Discord 上で広告を起稿（テキスト + リンク + 画像 / GIF）
+2. 専用チャンネルで審査者が承認/却下（理由必須）
+3. 承認された広告が Web サイトに **重み付きランダム**で配信
+4. impression / click を記録、ダッシュボードと CTR レポートを提供
+
+### 重み付き配信モデル
+
+- スポンサーの Discord ロール（Tier）ごとに `weight`（重み）を定義
+- 承認時点の Tier weight を `weight_snapshot` に凍結
+- Web からの配信要求に対し、有効広告から重み付きランダムで選択
+
+## 2. アーキテクチャ概要
+
+```
+[スポンサー]                              [Discord]
+   │                                          │
+   │ Slash/Button/Modal                       │ Interactions Endpoint URL (HTTPS)
+   ▼                                          ▼
+┌───────────────────────────────────────────────────────┐
+│  Cloudflare Workers (Hono)                            │
+│   ├ /interactions  : Discord 受信                     │
+│   ├ /ads/serve     : 広告配信 API                      │
+│   ├ /ads/click/:id : クリック計測 → 302                │
+│   ├ /ads/image/:id : 画像配信 (S3 プロキシ)            │
+│   └ /ads/track/*   : 補助計測エンドポイント            │
+└──────┬─────────────────────┬──────────────────────────┘
+       │ Postgres (HTTPS or  │ S3 互換 API (HTTPS)
+       │  Hyperdrive)         │
+       ▼                     ▼
+  [既存 PostgreSQL]      [既存 NAS S3 互換]
+```
+
+### 技術スタック
+
+| 層 | 採用 |
+|---|---|
+| Runtime | **Cloudflare Workers** |
+| Language | **TypeScript** |
+| Web Framework | **Hono** |
+| DB | **既存 PostgreSQL** (Hyperdrive 経由 or 直接 pg) |
+| ORM/Migration | **drizzle-orm** + **drizzle-kit** |
+| Object Storage | **既存 NAS の S3 互換**（MinIO / Synology / TrueNAS 等） |
+| S3 Client | **@aws-sdk/client-s3** (Workers 互換) |
+| Discord 受信 | **HTTP Interactions Endpoint URL**（Gateway は使わない） |
+| Discord 送信 | **Discord REST API**（Embed 投稿/編集、DM、コマンド登録） |
+| 署名検証 | **Ed25519**（discord-interactions または自前） |
+| Validation | **Zod** |
+| Image probing | Workers WebAssembly 画像プローブ（軽量実装） |
+
+### Web 管理画面は採用しない
+
+すべての管理操作は Discord で完結する。OAuth、HTML レンダリング、Cookie、CSP/CSRF は不要。
+
+### サーバレス制約
+
+discord.js は **使用しない**（Gateway WebSocket 必須のため）。
+Discord からの全イベントは Interactions Endpoint URL 経由の HTTP POST で受け取る。Bot からの能動アクション（メッセージ投稿・編集・DM 送信）は REST API を直接呼ぶ。
+
+## 3. データモデル
+
+### 3.1 sponsors
+
+```sql
+CREATE TABLE sponsors (
+  discord_user_id  TEXT PRIMARY KEY,
+  display_name     TEXT NOT NULL,
+  current_tier_id  INT REFERENCES tiers(id),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+`current_tier_id` は起稿時の lazy refresh で更新される（HTTP Bot は Gateway イベントを受け取れないため）。
+
+### 3.2 tiers
+
+```sql
+CREATE TABLE tiers (
+  id               SERIAL PRIMARY KEY,
+  discord_role_id  TEXT UNIQUE NOT NULL,
+  name             TEXT NOT NULL,
+  weight           INT  NOT NULL CHECK (weight > 0),
+  max_active_ads   INT  NOT NULL DEFAULT 1,
+  rank             INT  NOT NULL
+);
+```
+
+- `weight`: 重み付き選択の重み
+- `max_active_ads`: 同時に出せる広告数の上限
+- `rank`: 表示順序（管理画面で並べ替え用）
+
+### 3.3 ads
+
+```sql
+CREATE TABLE ads (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sponsor_id       TEXT REFERENCES sponsors(discord_user_id),
+  is_house         BOOLEAN NOT NULL DEFAULT false,
+  slot             TEXT NOT NULL DEFAULT 'default',
+  title            TEXT NOT NULL,
+  body             TEXT NOT NULL,
+  link_url         TEXT NOT NULL,
+  image_key        TEXT,
+  image_mime       TEXT,
+  image_bytes      INT,
+  image_width      INT,
+  image_height     INT,
+  status           TEXT NOT NULL CHECK (status IN
+                       ('pending','approved','paused','rejected','expired','withdrawn')),
+  weight_snapshot  INT,
+  reject_reason    TEXT,
+  reviewed_by      TEXT,
+  reviewed_at      TIMESTAMPTZ,
+  starts_at        TIMESTAMPTZ,
+  ends_at          TIMESTAMPTZ,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ads_house_or_sponsor
+    CHECK ((is_house = true AND sponsor_id IS NULL)
+        OR (is_house = false AND sponsor_id IS NOT NULL))
+);
+
+CREATE INDEX ads_active_idx
+  ON ads (status, slot, starts_at, ends_at)
+  WHERE status = 'approved';
+```
+
+- `weight_snapshot`: 承認時点の Tier weight を凍結。Tier 変更があっても掲載中の重みは保持される
+- `is_house`: 候補ゼロ時のフォールバック広告。`sponsor_id` は NULL
+- `ends_at`: NULL = 無期限、未来の値 = その時刻に自動失効
+- `slot`: 掲載枠の識別子。MVP は `'default'` のみ運用
+
+### 3.4 ad_format_rules
+
+```sql
+CREATE TABLE ad_format_rules (
+  id                    SERIAL PRIMARY KEY,
+  slot                  TEXT NOT NULL UNIQUE,
+  allowed_mimes         TEXT[] NOT NULL,
+  allowed_extensions    TEXT[] NOT NULL,
+  max_bytes             INT  NOT NULL,
+  min_width             INT,
+  max_width             INT,
+  min_height            INT,
+  max_height            INT,
+  aspect_ratios         TEXT[],
+  aspect_tolerance      NUMERIC(4,3) DEFAULT 0.02,
+  title_max_len         INT  NOT NULL DEFAULT 80,
+  body_max_len          INT  NOT NULL DEFAULT 500,
+  link_url_max_len      INT  NOT NULL DEFAULT 2048,
+  link_scheme           TEXT[] NOT NULL DEFAULT ARRAY['https'],
+  link_domain_allowlist TEXT[],
+  link_domain_blocklist TEXT[],
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by            TEXT
+);
+```
+
+すべての制約は **管理者が Discord 上で編集可能**。バリデーションは起稿時にこのテーブルに従い、違反は受け付け拒否（DB / S3 への書き込みなし）。
+
+### 3.5 ad_drafts
+
+```sql
+CREATE TABLE ad_drafts (
+  id           UUID PRIMARY KEY,
+  sponsor_id   TEXT NOT NULL,
+  slot         TEXT NOT NULL,
+  image_key    TEXT NOT NULL,    -- staging/{id}/orig.{ext}
+  image_mime   TEXT NOT NULL,
+  image_bytes  INT  NOT NULL,
+  image_width  INT,
+  image_height INT,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+`/ad submit` で添付画像を S3 staging へ PUT した後、Modal 提出までの一時保管。Workers Cron で TTL 切れを掃除（S3 staging も同期削除）。
+
+### 3.6 ad_events
+
+```sql
+CREATE TABLE ad_events (
+  id          BIGSERIAL PRIMARY KEY,
+  ad_id       UUID NOT NULL REFERENCES ads(id),
+  event_type  TEXT NOT NULL CHECK (event_type IN ('impression','click')),
+  ts          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ip_hash     TEXT,
+  ua          TEXT,
+  slot        TEXT
+);
+
+CREATE INDEX ad_events_ad_ts_idx ON ad_events USING BRIN (ad_id, ts);
+
+CREATE VIEW ad_stats_daily AS
+  SELECT ad_id,
+         date_trunc('day', ts) AS day,
+         COUNT(*) FILTER (WHERE event_type='impression') AS impressions,
+         COUNT(*) FILTER (WHERE event_type='click')      AS clicks
+  FROM ad_events
+  GROUP BY ad_id, date_trunc('day', ts);
+```
+
+- `ip_hash = sha256(ip || daily_salt)`、`daily_salt` は UTC 0 時にローテ
+- 個別の生 IP は保存しない
+- 保持期間: 180 日（Workers Cron で日次削除）
+
+### 3.7 review_logs / admin_logs
+
+```sql
+CREATE TABLE review_logs (
+  id          BIGSERIAL PRIMARY KEY,
+  ad_id       UUID NOT NULL REFERENCES ads(id),
+  reviewer_id TEXT NOT NULL,
+  action      TEXT NOT NULL CHECK (action IN ('approved','rejected','withdrawn')),
+  reason      TEXT,
+  ts          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE admin_logs (
+  id          BIGSERIAL PRIMARY KEY,
+  actor_id    TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  target_kind TEXT NOT NULL,
+  target_id   TEXT,
+  before      JSONB,
+  after       JSONB,
+  ts          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+### 3.8 system_settings
+
+```sql
+CREATE TABLE system_settings (
+  key   TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT
+);
+```
+
+メニューメッセージ ID、ハウス広告枠の有無、salt ローテ時刻などを格納。
+
+## 4. Discord UX 設計
+
+### 4.1 チャンネル構成
+
+| チャンネル | 役割 | 閲覧 | メッセージ送信 |
+|---|---|---|---|
+| **#広告起稿** | スポンサー向け常設メニュー + `/ad submit` | スポンサー以上 | Bot のみ可（ユーザー不可） |
+| **#広告審査** | 審査 Embed + 承認/却下ボタン | 審査ロール以上 | Bot のみ可 |
+| **#広告管理** | 管理コンソール常設メニュー | 管理ロールのみ | Bot のみ可 |
+
+### 4.2 #広告起稿 の常設メニュー
+
+```
+📣 広告起稿システム
+
+起稿は下のチャット欄から /ad submit
+  slot を選び、image に画像を添付してください
+添付後、タイトル/本文/リンクの入力画面が開きます
+
+[📋 自分の広告一覧] [📊 統計]
+[📐 入稿ルール]    [❓ 起稿の手順を見る]
+```
+
+### 4.3 起稿フロー
+
+```
+ユーザー: /ad submit  コマンドを開く
+  ↓ Discord UI:
+    slot:  [▼ default]            ← Select option (choices)
+    image: [📎 ここに画像をドラッグ]   ← ATTACHMENT option
+
+ユーザー: 画像添付して送信
+  └─ Worker:
+     1. Ed25519 署名検証
+     2. sponsor の Tier を Discord REST で再取得（lazy refresh）
+        - tier.max_active_ads と current_active_count をチェック
+        - 上限超過なら ephemeral 拒否（S3 書き込みなし）
+     3. attachment.url / size / content_type / dimensions を ad_format_rules で検証
+     4. NG → ephemeral エラー、終了（DB / S3 書き込みなし）
+     5. OK → S3 staging/{draft_id}/orig.{ext} に PUT
+     6. ad_drafts INSERT (TTL 10分)
+     7. Modal を返す（custom_id="submit:{draft_id}"）
+        ┌────────────────────────────┐
+        │ 📝 広告内容を入力             │
+        │ タイトル  : [_____________]   │
+        │ 本文     : [             ]   │
+        │           [             ]   │
+        │ リンクURL : [_____________]   │
+        └────────────────────────────┘
+
+ユーザー: Modal 提出
+  └─ Worker:
+     1. draft_id から下書き取得（期限切れなら ephemeral でやり直しを案内）
+     2. テキストをルール検証
+        - title/body 長さ
+        - link_url の scheme (https のみ)
+        - link_url の domain allowlist/blocklist
+     3. NG → ephemeral エラー、staging は TTL で自動削除
+     4. OK:
+        - max_active_ads を再チェック（Modal 入力中に他で枠を埋めた可能性）
+        - staging/{draft_id}/orig.* → ads/{adId}/orig.* に S3 内コピー
+        - ads INSERT (status='pending')
+        - ad_drafts DELETE + staging オブジェクト削除
+        - 審査チャンネルへ Embed + ボタン (Approve / Reject) を投稿
+        - ephemeral「✅ 受付完了 / 結果は DM で通知」
+```
+
+### 4.4 #広告起稿 のボタン挙動
+
+| ボタン | 挙動 |
+|---|---|
+| 📋 自分の広告一覧 | ephemeral Embed 一覧（pending/approved/paused/rejected/withdrawn）。各広告に `↩ 取り下げ` `📊 個別統計` ボタン |
+| 📊 統計 | ephemeral 期間 Select（24h/7d/30d/all）→ 自分の広告の合算 impressions/clicks/CTR を Embed |
+| 📐 入稿ルール | ephemeral でスロットごとの ad_format_rules を Embed 表示 |
+| ❓ 起稿の手順を見る | ephemeral でスクリーンショット風の手順ガイド Embed |
+
+### 4.5 #広告審査 の挙動
+
+```
+レビュアー: 起稿 Embed の [✅承認] または [❌却下] を押下
+  └─ Worker:
+     1. 署名検証 + member.roles に審査ロール ID 含有を確認
+        無ければ ephemeral 拒否
+     2. ads.status を WHERE status='pending' で楽観ロック UPDATE
+        既に処理済なら ephemeral「他のレビュアーが処理しました」
+     3a. Approve:
+        - sponsor の現在 Tier weight → ads.weight_snapshot
+        - status='approved', starts_at=now(), reviewed_by/at
+        - review_logs INSERT
+        - 元 Embed を「✅ 承認済 by @reviewer」に編集
+        - 起稿者に DM「承認されました、配信開始」
+     3b. Reject:
+        - レビュアーへ Modal を返し reject_reason 入力
+        - status='rejected', reject_reason, reviewed_by/at
+        - review_logs INSERT
+        - Embed を「❌ 却下 by @reviewer / 理由: ...」に編集
+        - 起稿者に DM「却下されました: <理由>」
+```
+
+### 4.6 #広告管理 の常設メニュー
+
+```
+🛠 広告管理コンソール
+
+現在の状況: 配信中 12 / 審査待ち 3 / 却下 5
+
+── 広告 ──
+[📜 全広告一覧] [⏸ 一時停止] [▶ 再開]
+[✂ 強制終了] [📝 編集]
+
+── 設定 ──
+[📐 入稿ルール] [🏆 ティア管理] [🏠 ハウス広告]
+
+── 統計 ──
+[📊 全体統計] [📈 期間別レポート] [📁 CSV出力]
+
+── システム ──
+[🔄 メニュー再投稿] [🧂 ソルト即時ローテ] [🩺 ヘルスチェック]
+```
+
+| ボタン | 挙動 |
+|---|---|
+| 📜 全広告一覧 | ephemeral Embed + ページング Select。status / sponsor / slot で絞り込み |
+| ⏸ 一時停止 | 広告選択 Select → status='paused'（履歴・統計は残るが配信から外れる） |
+| ▶ 再開 | paused → approved に戻す |
+| ✂ 強制終了 | 広告選択 → 確認ボタン → ends_at=now()。起稿者へ DM 通知 |
+| 📝 編集 | 広告選択 → Modal で title/body/link 編集（画像差し替えは別コマンド `/ad replace-image`） |
+| 📐 入稿ルール | スロット選択 → Modal で **JSON 編集**。構文エラーは ephemeral で拒否、保存しない |
+| 🏆 ティア管理 | 既存ティア一覧 + ➕追加 / ✏編集 / 🗑削除。ロール ID は Discord の Role Select で指定 |
+| 🏠 ハウス広告 | 候補ゼロ時の表示用広告を CRUD（管理者直接登録、sponsor_id は NULL） |
+| 📊 全体統計 | 期間 Select → Top10 + 合計 impressions/clicks/CTR を Embed |
+| 📈 期間別レポート | 開始日 + 終了日 Modal → 日別 CTR を Embed（チャート画像は Worker 生成 → 添付 or URL） |
+| 📁 CSV出力 | 期間 Select → Bot が **CSV 添付ファイル**で返信（Discord 添付 10MB 内） |
+| 🔄 メニュー再投稿 | コマンド/メニューのスキーマ更新時に各チャンネルのメニューを貼り直す |
+| 🧂 ソルト即時ローテ | IP_HASH_SALT を即時更新（インシデント対応用） |
+| 🩺 ヘルスチェック | DB / S3 / Discord API 到達性を ephemeral で表示 |
+
+### 4.7 スラッシュコマンド一覧
+
+| コマンド | 利用者 | 用途 |
+|---|---|---|
+| `/ad submit slot:<choice> image:<attachment>` | スポンサー | 起稿（添付制約のため Slash） |
+| `/ad replace-image id:<string> image:<attachment>` | スポンサー / 管理者 | 既存広告の画像差し替え |
+| `/ad-setup channel:<channel> kind:<submit\|review\|admin>` | 管理者 | 常設メニューを指定チャンネルに投稿（または再投稿） |
+
+それ以外（一覧/取下/統計/ルール/管理操作）はすべて常設メニューのボタンで完結。
+
+## 5. 配信 API
+
+### 5.1 GET /ads/serve
+
+| Query | 必須 | 説明 |
+|---|---|---|
+| `slot` | ✅ | 掲載枠 |
+| `n` | | 取得件数（デフォルト 1、上限 5） |
+
+#### レスポンス
+
+```json
+{
+  "slot": "default",
+  "served_at": "2026-05-07T15:30:00Z",
+  "ads": [
+    {
+      "id": "01HXXX...",
+      "title": "...",
+      "body": "...",
+      "image_url": "https://<worker>/ads/image/01HXXX...",
+      "click_url": "https://<worker>/ads/click/01HXXX...",
+      "impression_token": "v1.<hmac>"
+    }
+  ]
+}
+```
+
+候補ゼロの場合: 200 OK + ハウス広告 1 件、ハウスもなければ 204 No Content。
+
+### 5.2 重み付き選択クエリ
+
+```sql
+-- 通常広告の重み付き選択（ハウス広告は除外）
+WITH candidates AS (
+  SELECT id, title, body, link_url, image_key, weight_snapshot
+    FROM ads
+   WHERE status = 'approved'
+     AND is_house = false
+     AND slot   = $1
+     AND starts_at <= now()
+     AND (ends_at IS NULL OR ends_at > now())
+)
+SELECT *
+  FROM candidates
+ ORDER BY -ln(random()) / weight_snapshot ASC
+ LIMIT $2;
+```
+
+候補ゼロ時のハウス広告選択は別クエリ（`is_house = true AND status = 'approved' AND slot = $1`、複数あればランダム 1 件）。
+
+候補数が 1000 を超えた段階で materialized view + キャッシュへ移行（将来オプション）。
+
+### 5.3 GET /ads/click/:adId
+
+```
+1. ads.link_url を DB から取得（クエリ ?to= は無視、オープンリダイレクト防止）
+2. INSERT INTO ad_events('click') ※ ip_hash + adId の 5 分窓重複は除外
+3. 302 Location: <ads.link_url>
+```
+
+### 5.4 GET /ads/image/:adId
+
+S3 から `fetch` → Cache-API でエッジキャッシュ → レスポンス。
+Cache-Control / ETag を適切に設定。NAS の認証情報は外に出さない。
+
+### 5.5 計測の重複・bot 除外
+
+- `User-Agent` に `bot|crawl|spider|preview` を含むものは記録しない
+- `ip_hash = sha256(ip || daily_salt)` で 5 分以内の同一 (ip_hash, ad_id) はカウントしない
+- HEAD リクエストは impression としてカウントしない
+
+### 5.6 レート制限
+
+- `/ads/serve`: 1 IP あたり 60 req/min
+- `/ads/click/:adId`: 1 IP + adId あたり 10 req/min
+- `/interactions`: 制限なし（Discord 署名検証で十分）
+
+Cloudflare の Rate Limiting Rules を利用。
+
+## 6. セキュリティ
+
+| 項目 | 対策 |
+|---|---|
+| Discord 真正性 | Ed25519 署名検証（`X-Signature-Ed25519` / `X-Signature-Timestamp`）、失敗は 401 |
+| 管理操作の認可 | interactions.member.roles に **管理ロール ID** が含まれるか毎回サーバ側で再検証 |
+| 審査操作の認可 | 同様に **審査ロール ID** を再検証 |
+| オープンリダイレクト | `/ads/click/:adId` は `to` パラメータを受け取っても無視、サーバ側 `ads.link_url` のみ使用 |
+| XSS | 広告本文/タイトルは全層テキスト扱い、HTML 入稿不可（Modal 受信時にバリデート） |
+| 画像偽装 | Content-Type + 拡張子に加えて **マジックバイト**で二重判定 |
+| SSRF | MVP では画像は Discord 添付のみ受け付け（外部 URL 取得なし）。将来外部 URL を許す場合は private IP / metadata IP を解決時にブロック |
+| Secrets | Workers Secrets に保存、コードへの直書き禁止 |
+| 個人情報 | 生 IP は保存せず ip_hash のみ、daily_salt は UTC 0 時にローテ |
+| データ保持 | `ad_events` は 180 日で削除、`ad_drafts` は 10 分 TTL、staging S3 は同期削除 |
+| Rate limit | 上記 5.6 |
+
+## 7. 運用
+
+### 7.1 環境
+
+- **dev**: `wrangler dev` + ローカル / staging Postgres + ローカル MinIO
+- **staging**: 本番と同等構成、別 DB / 別バケット
+- **prod**: 本番
+
+### 7.2 デプロイ
+
+- Workers: `wrangler deploy`（`prod` / `staging` 環境分離）
+- Postgres マイグレーション: `drizzle-kit migrate` を CI から実行
+- Discord コマンド登録: `scripts/register-commands.ts`（環境ごとにギルド限定で登録）
+
+### 7.3 監視
+
+- Cloudflare Workers の `tail` ログ
+- Postgres の `review_logs` / `admin_logs` で監査追跡
+- 5xx 検知時に管理用 Webhook で監視 Discord チャンネルへ通知
+
+### 7.4 バックアップ
+
+- Postgres: 既存 NAS 側のスナップショット運用に乗せる
+- S3 バケット: NAS 側で週次レプリケーション
+
+### 7.5 Cron ジョブ（Workers Cron Triggers）
+
+| 頻度 | 処理 |
+|---|---|
+| 毎時 | `ad_drafts` の期限切れ削除 + 対応する S3 staging オブジェクト削除 |
+| 毎時 | `ads` の `ends_at < now()` を `expired` に遷移 |
+| 1日 1回（UTC 0 時） | `daily_salt` ローテ |
+| 1日 1回 | 180 日超過の `ad_events` を削除 |
+| 1日 1回 | `system_settings` のヘルスサマリーを管理チャンネルへ投稿 |
+
+## 8. 環境変数
+
+```bash
+# Discord
+DISCORD_APP_ID=
+DISCORD_PUBLIC_KEY=
+DISCORD_BOT_TOKEN=
+GUILD_ID=
+SUBMIT_CHANNEL_ID=
+REVIEW_CHANNEL_ID=
+ADMIN_CHANNEL_ID=
+REVIEWER_ROLE_ID=
+ADMIN_ROLE_ID=
+
+# Storage
+POSTGRES_URL=postgres://user:pass@nas-host:5432/discordadserver
+HYPERDRIVE_ID=                  # CF Hyperdrive 利用時のみ
+S3_ENDPOINT=https://nas-host:9000
+S3_REGION=us-east-1
+S3_BUCKET=ad-server
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
+
+# Worker
+SITE_API_KEY=                   # /ads/serve への site key（任意）
+IP_HASH_SALT_BOOTSTRAP=         # 初回起動用シード。以降の daily_salt は system_settings or KV で永続化・自動ローテ
+WORKER_BASE_URL=https://ads.example.com
+```
+
+`daily_salt` の現在値はランタイムでローテするため env ではなく `system_settings` テーブル（または Workers KV）に格納する。`IP_HASH_SALT_BOOTSTRAP` は初回起動時の初期値供給にのみ使用。
+
+## 9. ディレクトリ構成
+
+```
+discordapi_ad_server/
+├ src/
+│ ├ index.ts                  # Hono ルータ
+│ ├ interactions/
+│ │  ├ verify.ts              # Ed25519 検証
+│ │  ├ commands.ts            # /ad submit, /ad-setup, /ad replace-image
+│ │  ├ buttons.ts             # 一覧/取下/統計/ルール/管理 ボタン
+│ │  ├ modals.ts              # 各 Modal handler
+│ │  └ review.ts              # Approve/Reject ボタン
+│ ├ serve/
+│ │  ├ pick.ts                # 重み付きランダム
+│ │  ├ image.ts               # /ads/image/:adId プロキシ
+│ │  ├ click.ts               # /ads/click/:adId
+│ │  └ track.ts               # impression/click 記録
+│ ├ db/
+│ │  ├ client.ts              # Postgres pool / Hyperdrive
+│ │  └ schema.ts              # drizzle schema
+│ ├ storage/
+│ │  └ s3.ts                  # AWS SDK v3 S3 client
+│ ├ validation/
+│ │  ├ rules.ts               # ad_format_rules ロード/キャッシュ
+│ │  ├ image.ts               # マジックバイト/サイズ/比率
+│ │  └ text.ts                # title/body/url
+│ ├ discord/
+│ │  ├ rest.ts                # REST 呼び出し
+│ │  ├ menus.ts               # 常設メニュー定義
+│ │  └ embeds.ts              # Embed builder
+│ ├ admin/
+│ │  ├ ads.ts                 # 一覧/編集/停止/再開/強制終了
+│ │  ├ rules.ts               # ad_format_rules CRUD
+│ │  ├ tiers.ts               # ティア CRUD
+│ │  ├ house.ts               # ハウス広告 CRUD
+│ │  ├ stats.ts               # 集計クエリ + チャート生成
+│ │  └ system.ts              # ソルトローテ / メニュー再投稿
+│ ├ cron/
+│ │  └ index.ts               # scheduled handler
+│ └ utils/
+├ migrations/                 # SQL
+├ scripts/
+│  └ register-commands.ts     # Discord コマンド登録
+├ wrangler.toml
+├ drizzle.config.ts
+├ package.json
+├ tsconfig.json
+├ .env.example
+├ README.md
+└ docs/
+   └ superpowers/
+      └ specs/
+         └ 2026-05-07-discord-ad-server-design.md  # 本書
+```
+
+## 10. MVP スコープ
+
+| 機能 | MVP | 将来 |
+|---|---|---|
+| `/ad submit` 添付 + Modal 起稿 | ✅ | |
+| 承認/却下ボタン + reject reason | ✅ | |
+| 重み付きランダム配信 `/ads/serve` | ✅ | |
+| impression/click 計測 + CTR | ✅ | |
+| `ad_format_rules` Discord 編集（JSON Modal） | ✅ | フィールド別 Modal |
+| 自分の広告一覧 / 取下 / 自分の統計 | ✅ | |
+| 管理コンソール（一覧/編集/停止/再開/終了） | ✅ | |
+| ティア管理（CRUD） | ✅ | |
+| ハウス広告 | ✅ | |
+| 全体統計 / 期間別レポート / CSV 出力 | ✅ | チャート画像 / 自動定期送信 |
+| 監査ログ（review_logs / admin_logs） | ✅ | |
+| Cron（draft 掃除 / expire / salt rot / event 削除） | ✅ | |
+| 複数 slot 運用 | スキーマのみ | UI 整備 |
+| 期間予約（未来 starts_at） | スキーマのみ | UI 追加 |
+| Tier ロール変更の自動反映 | lazy refresh | Cron 同期 |
+| 不正クリック対策 | UA + ip_hash 5分窓 | スコアリング |
+| Web 管理画面 | ❌ 採用しない | ❌ 採用しない |
+
+## 11. オープンクエスチョン
+
+- **Hyperdrive**: 既存 Postgres が外部から TLS で到達できるなら Hyperdrive 推奨。NAS の Postgres ポート公開可否を確認すること
+- **画像差し替え時の旧オブジェクト**: `/ad replace-image` で旧 `image_key` を即削除するか、監査用に N 日保持するか（推奨: 30 日保持後 Cron で削除）
+- **Tier ダウン時の挙動**: 現行は `weight_snapshot` 凍結。将来 Tier 喪失で `paused` にする運用に変えるか要検討
+- **CSV エクスポートが 10MB を超える場合**: R2 への一時 PUT + presigned URL を Discord に貼る方式へ切り替え
