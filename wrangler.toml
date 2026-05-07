@@ -12,5 +12,11 @@ crons = ["0 * * * *"]
 [env.staging]
 name = "discordapi-ad-server-staging"
 
+[env.staging.triggers]
+crons = ["0 * * * *"]
+
 [env.production]
 name = "discordapi-ad-server"
+
+[env.production.triggers]
+crons = ["0 * * * *"]
