@@ -3,6 +3,15 @@ import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
 
+function isInteractionPayload(value: unknown): value is { type: number } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    typeof (value as { type: unknown }).type === 'number'
+  );
+}
+
 export const interactions = new Hono<{ Bindings: Bindings }>();
 
 interactions.post('/', async (c) => {
@@ -25,12 +34,17 @@ interactions.post('/', async (c) => {
   });
   if (!ok) return c.text('invalid signature', 401);
 
-  let payload: { type: number };
+  let parsed: unknown;
   try {
-    payload = JSON.parse(body) as { type: number };
+    parsed = JSON.parse(body);
   } catch {
     return c.json({ error: 'Bad Request' }, 400);
   }
+
+  if (!isInteractionPayload(parsed)) {
+    return c.json({ error: 'Bad Request' }, 400);
+  }
+  const payload = parsed;
 
   if (payload.type === InteractionType.PING) {
     return c.json({ type: InteractionResponseType.PONG });

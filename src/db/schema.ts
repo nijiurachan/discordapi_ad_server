@@ -42,6 +42,8 @@ export const ads = pgTable(
   'ads',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    // No onDelete cascade: ads must outlive sponsor deletion for audit/history
+    // (status transitions to 'expired'/'withdrawn' instead of hard delete).
     sponsorId: text('sponsor_id').references(() => sponsors.discordUserId),
     kind: text('kind').notNull().default('regular'),
     slot: text('slot').notNull().default('default'),
