@@ -177,6 +177,8 @@ trim_trailing_whitespace = false
 
 - [ ] **Step 5: `wrangler.toml` を作成**
 
+Wrangler の環境モデルでは top-level の `[triggers]` は `[env.*]` には継承されないので、staging / production にもそれぞれ triggers を定義する。
+
 ```toml
 name = "discordapi-ad-server"
 main = "src/index.ts"
@@ -192,8 +194,14 @@ crons = ["0 * * * *"]
 [env.staging]
 name = "discordapi-ad-server-staging"
 
+[env.staging.triggers]
+crons = ["0 * * * *"]
+
 [env.production]
 name = "discordapi-ad-server"
+
+[env.production.triggers]
+crons = ["0 * * * *"]
 ```
 
 - [ ] **Step 6: `.env.example` を作成（spec §8 と整合）**
