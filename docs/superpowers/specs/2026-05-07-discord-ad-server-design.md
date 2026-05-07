@@ -407,13 +407,111 @@ sendResultDM(ad, action, reject_reason?)
   1. Discord REST  POST /users/@me/channels  body: {recipient_id: ad.sponsor_id}
      → DM チャンネル ID を取得（既に開いていれば既存 ID が返る）
   2. POST /channels/{dm_channel_id}/messages  body: {embeds: [...]}
-  3. レスポンスが 403 (Cannot send messages to this user) の場合のフォールバック:
-     a. ads テーブルに dm_delivery_status を更新 ('failed')
-     b. #広告起稿 チャンネルに **メンション付き ephemeral ではないメッセージ**で通知
-        例: "<@sponsor_id> 審査結果が出ました（DM をオフにされているためここで通知）"
-        + 結果 Embed を同じメッセージに添付
-     c. admin_logs に記録（action='dm_failed_fallback'）
+  3. レスポンスが 403 (Cannot send messages to this user) の場合は
+     プライベート個別通知チャンネルを作成してフォールバック（後述 §4.5.2）
 ```
+
+### 4.5.2 DM 失敗時のプライベート個別チャンネル fallback
+
+DM が拒否された場合、起稿者以外には見えない一時プライベートチャンネルを作成し、そこで結果を通知する。起稿者が「了解」ボタンを押下、または TTL 経過で自動削除される。
+
+**1. チャンネル作成**
+
+```
+fallbackToPrivateChannel(ad, action, reject_reason?)
+  1. Discord REST POST /guilds/{GUILD_ID}/channels
+     body:
+       {
+         "name": "result-{ad.id 先頭8字}",
+         "type": 0,                          // GUILD_TEXT
+         "parent_id": FALLBACK_CHANNEL_CATEGORY_ID,
+         "permission_overwrites": [
+           { "id": GUILD_ID,            "type": 0, "deny":  "1024" },  // @everyone: VIEW_CHANNEL deny
+           { "id": ad.sponsor_id,       "type": 1, "allow": "1024 | 65536" },  // 起稿者: VIEW + READ_MESSAGE_HISTORY
+           { "id": DISCORD_APP_BOT_ID,  "type": 1, "allow": "1024 | 2048 | 65536 | 16384" }
+                                                                       // Bot: VIEW + SEND + READ_HISTORY + MANAGE_MESSAGES
+         ],
+         "topic": "個別通知（このチャンネルは「了解」ボタン押下または7日後に自動削除されます）"
+       }
+     → channel_id を取得
+
+  2. POST /channels/{channel_id}/messages
+     body:
+       {
+         "content": "<@{ad.sponsor_id}> 広告審査の結果通知です（DM がオフのためこちらに送信しました）",
+         "embeds": [<同じ承認/却下 Embed>],
+         "components": [
+           { "type": 1, "components": [
+             { "type": 2, "style": 1, "label": "✅ 了解", "custom_id": "ack:{dm_fallback_id}" }
+           ]}
+         ]
+       }
+
+  3. INSERT INTO dm_fallback_channels (id, ad_id, sponsor_id, channel_id, expires_at)
+     VALUES (..., now() + interval '7 days')
+
+  4. UPDATE ads SET dm_delivery_status = 'fallback_posted', dm_delivered_at = now()
+
+  5. admin_logs INSERT (action='dm_fallback_created', target=ad.id)
+```
+
+**2. 「了解」ボタン押下時**
+
+```
+ボタン custom_id = "ack:<dm_fallback_id>"
+  1. 署名検証
+  2. SELECT FROM dm_fallback_channels WHERE id = $1
+  3. interactions.member.user.id != sponsor_id なら ephemeral「あなたは対象ではありません」
+     （起稿者本人以外がボタンを押せないチャンネル設計だが、念のため再検証）
+  4. UPDATE dm_fallback_channels SET acknowledged_at = now() WHERE id = $1
+  5. UPDATE ads SET dm_delivery_status = 'fallback_acknowledged'
+  6. Discord REST DELETE /channels/{channel_id}
+     失敗（既に削除されている等）は無視、admin_logs に warn として記録
+  7. admin_logs INSERT (action='dm_fallback_acknowledged')
+```
+
+ボタン応答は ack の前段階で `interactions.callback_type=4` (CHANNEL_MESSAGE_WITH_SOURCE) または `5` (DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE) を返す必要があるが、その後の DELETE channel は非同期で OK。
+
+**3. 自動削除（Cron）**
+
+毎時実行する Cron ジョブで TTL 切れの未確認チャンネルを掃除：
+
+```sql
+SELECT id, channel_id FROM dm_fallback_channels
+ WHERE acknowledged_at IS NULL
+   AND expires_at < now();
+```
+
+各レコードについて:
+- Discord REST DELETE /channels/{channel_id}
+- UPDATE dm_fallback_channels SET acknowledged_at = now() （`auto_expired` を区別したいなら別カラム追加可）
+- ads.dm_delivery_status は `failed` に再遷移（起稿者は気付かなかったまま終了）
+- admin_logs INSERT (action='dm_fallback_expired')
+
+**4. 同一広告で複数回作らない**
+
+同じ ad_id について `dm_fallback_channels.acknowledged_at IS NULL` のレコードが既にある場合、新規作成せず既存チャンネルへ追記投稿する。
+
+**5. 必要な Bot 権限**
+
+- `MANAGE_CHANNELS` (権限ビット `0x10` = 16): プライベートチャンネル作成・削除
+- `MANAGE_ROLES` (権限ビット `0x10000000`): permission_overwrites の設定
+- `SEND_MESSAGES` (`0x800`)
+- `EMBED_LINKS` (`0x4000`)
+- `MENTION_EVERYONE` は不要（個別ユーザーのメンションは標準権限で可能）
+
+**6. 追加 env**
+
+```
+FALLBACK_CHANNEL_CATEGORY_ID=  # プライベート通知チャンネルが作成されるカテゴリ
+DISCORD_APP_BOT_ID=            # Bot ユーザーの id（権限上書きで参照）
+```
+
+**7. プライバシー上のメリット**
+
+- 結果は起稿者以外には永久に見えない
+- 了解後または TTL 後に Discord 側からも削除されるため痕跡が残らない
+- 監査が必要な情報（誰がいつ承認/却下した、理由）は `review_logs` / `admin_logs` に残るので運用上の透明性は維持される
 
 **DM Embed のフォーマット**
 
@@ -452,15 +550,44 @@ sendResultDM(ad, action, reject_reason?)
 ```sql
 ALTER TABLE ads
   ADD COLUMN dm_delivery_status TEXT
-    CHECK (dm_delivery_status IN ('pending','sent','failed','fallback_posted')),
+    CHECK (dm_delivery_status IN
+      ('pending','sent','failed','fallback_posted','fallback_acknowledged')),
   ADD COLUMN dm_delivered_at    TIMESTAMPTZ;
+
+CREATE TABLE dm_fallback_channels (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ad_id           UUID NOT NULL REFERENCES ads(id),
+  sponsor_id      TEXT NOT NULL,
+  channel_id      TEXT NOT NULL UNIQUE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at      TIMESTAMPTZ NOT NULL,
+  acknowledged_at TIMESTAMPTZ
+);
+
+CREATE INDEX dm_fallback_pending_idx
+  ON dm_fallback_channels (expires_at)
+  WHERE acknowledged_at IS NULL;
 ```
 
-承認/却下確定の時点で `dm_delivery_status='pending'` を立て、DM 送信成功で `'sent'`、失敗で `'failed'`、フォールバック投稿後に `'fallback_posted'` に遷移。
+`dm_delivery_status` の状態遷移:
+
+```
+ pending ──[DM POST 200]──► sent
+ pending ──[DM POST 403]──► failed ──[fallback channel 作成]──► fallback_posted
+                                                                    │
+                                       ┌──[Cron TTL 期限切れ]──── ┤
+                                       ▼                           │
+                                     failed                        │
+                                                                    │
+                                                              [了解ボタン押下]
+                                                                    │
+                                                                    ▼
+                                                          fallback_acknowledged
+```
 
 **再送機能**
 
-DM 失敗時、管理者は #広告管理 の `📜 全広告一覧` から該当広告を選択 → `🔁 DM 再送信` ボタンで再試行できる。
+`failed` または `fallback_posted` の広告については管理者が #広告管理 の `📜 全広告一覧` から該当広告を選択 → `🔁 DM 再送信` ボタンで再試行できる。再送信時は再度 DM を試み、また失敗したらプライベートチャンネル作成（既存 fallback がアクティブなら追記投稿）に進む。
 
 ### 4.6 #広告管理 の常設メニュー
 
@@ -727,6 +854,7 @@ Cloudflare の Rate Limiting Rules を利用。
 |---|---|
 | 毎時 | `ad_drafts` の期限切れ削除 + 対応する S3 staging オブジェクト削除 |
 | 毎時 | `ads` の `ends_at < now()` を `expired` に遷移 |
+| 毎時 | `dm_fallback_channels.acknowledged_at IS NULL AND expires_at < now()` のチャンネルを Discord REST で削除 + status 更新 |
 | 1日 1回（UTC 0 時） | `daily_salt` ローテ |
 | 1日 1回 | 180 日超過の `ad_events` を削除 |
 | 1日 1回 | `system_settings` のヘルスサマリーを管理チャンネルへ投稿 |
@@ -736,12 +864,14 @@ Cloudflare の Rate Limiting Rules を利用。
 ```bash
 # Discord
 DISCORD_APP_ID=
+DISCORD_APP_BOT_ID=                     # Bot ユーザーの id（permission_overwrites 用）
 DISCORD_PUBLIC_KEY=
 DISCORD_BOT_TOKEN=
 GUILD_ID=
 SUBMIT_CHANNEL_ID=
 REVIEW_CHANNEL_ID=
 ADMIN_CHANNEL_ID=
+FALLBACK_CHANNEL_CATEGORY_ID=           # DM 失敗時のプライベート通知チャンネル親カテゴリ
 REVIEWER_ROLE_ID=
 ADMIN_ROLE_ID=
 
@@ -835,7 +965,7 @@ discordapi_ad_server/
 | Cron（draft 掃除 / expire / salt rot / event 削除） | ✅ | |
 | `/admin submit`（管理者起稿、weight/sponsor 代行/auto_approve） | ✅ | |
 | プレースホルダー広告（kind='placeholder' / 募集中表示） | ✅ | |
-| 審査結果 DM（承認/却下とも、却下理由必須・DM 失敗時のチャンネル fallback） | ✅ | DM 再送 UI |
+| 審査結果 DM（承認/却下とも、却下理由必須・DM 失敗時のプライベートチャンネル fallback + 了解ボタン自己破棄） | ✅ | DM 再送 UI |
 | 複数 slot 運用 | スキーマのみ | UI 整備 |
 | 期間予約（未来 starts_at） | スキーマのみ | UI 追加 |
 | Tier ロール変更の自動反映 | lazy refresh | Cron 同期 |
