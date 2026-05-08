@@ -147,7 +147,12 @@ export async function runAdSubmit(
     return ephemeral(c, '画像の取得に失敗しました');
   }
   const detected = validateMagicBytes(bodyBytes);
-  if (!detected || detected !== attachment.content_type) {
+  // Defensive parse: Discord usually sends a bare MIME, but content_type may
+  // theoretically include parameters (e.g., "image/png; charset=utf-8"). Strip
+  // any parameter and lowercase to compare against the magic-bytes verdict
+  // (which is already lowercase).
+  const claimedMime = (attachment.content_type ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+  if (!detected || detected !== claimedMime) {
     return ephemeral(c, '画像形式が改ざんされている可能性があります');
   }
 
@@ -155,7 +160,15 @@ export async function runAdSubmit(
   const draftId = uuid();
   const ext = MIME_EXT[detected];
   const imageKey = `staging/${draftId}/orig.${ext}`;
-  await putObject(s3, bucket, imageKey, bodyBytes, detected);
+  try {
+    await putObject(s3, bucket, imageKey, bodyBytes, detected);
+  } catch (err) {
+    console.error('ad-submit: S3 putObject failed', { draftId, imageKey, err });
+    return ephemeral(
+      c,
+      'ステージングへの画像アップロードに失敗しました。しばらくしてから再度お試しください。',
+    );
+  }
 
   // 10. Insert ad_drafts row (expires in 10 minutes).
   await client.query(

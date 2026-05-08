@@ -54,7 +54,12 @@ export async function copyObject(
   await client.send(
     new CopyObjectCommand({
       Bucket: bucket,
-      CopySource: `${bucket}/${sourceKey}`,
+      // The AWS SDK requires CopySource to be URL-encoded. Our keys are
+      // UUID-based and safe today, but encoding defensively means future
+      // changes to key shape (e.g., user-provided slugs) won't silently
+      // break. encodeURIComponent percent-encodes "/" as "%2F", which the
+      // SDK accepts.
+      CopySource: encodeURIComponent(`${bucket}/${sourceKey}`),
       Key: destKey,
     }),
   );

@@ -29,10 +29,11 @@ export async function postReviewEmbed(args: PostReviewEmbedArgs): Promise<void> 
   const imageUrl = `${args.workerBaseUrl}/images/ads/${args.ad.id}/orig.${args.ad.imageExt}`;
   const embed = {
     title: '📥 新しい広告審査依頼',
+    url: args.ad.linkUrl,
     description: `**${args.ad.title}**`,
     fields: [
       { name: '本文', value: args.ad.body.slice(0, 1024), inline: false },
-      { name: 'リンク URL', value: args.ad.linkUrl, inline: false },
+      { name: 'リンク URL', value: args.ad.linkUrl.slice(0, 1024), inline: false },
       { name: 'スロット', value: args.ad.slot, inline: true },
       { name: 'スポンサー', value: `<@${args.sponsor.id}>`, inline: true },
       { name: '広告 ID', value: `\`${args.ad.id}\``, inline: false },

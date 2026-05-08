@@ -109,10 +109,25 @@ describe('/interactions router → command/modal dispatch (integration)', () => 
       },
     });
     const res = await post(body);
-    // Either a 500 (DB connect failure surfaces as Worker error) or an
-    // ephemeral 200 — the only thing we know for certain is it isn't the
-    // dispatch-level 501 "unknown command".
-    expect(res.status).not.toBe(501);
+    // In test env with unreachable DB the handler may either:
+    //   - 200 ephemeral (caught the DB error and returned a user-facing
+    //     message), or
+    //   - 500 (error escaped without ephemeral wrapping).
+    // Both shapes prove the request reached the handler (i.e. it isn't the
+    // dispatch-level 501 "unknown command"); only the 200 path has a body
+    // shape worth asserting.
+    expect([200, 500]).toContain(res.status);
+    if (res.status === 200) {
+      const body = (await res.json()) as {
+        type: number;
+        data?: { content?: string; flags?: number };
+      };
+      // Ephemeral interaction response: type=4 (CHANNEL_MESSAGE_WITH_SOURCE),
+      // flags=64 (EPHEMERAL bit).
+      expect(body.type).toBe(4);
+      expect(body.data?.flags).toBe(64);
+      expect(typeof body.data?.content).toBe('string');
+    }
   });
 
   it('routes submit modal to the handler (DB unreachable in test env → handler returns)', async () => {
@@ -139,7 +154,16 @@ describe('/interactions router → command/modal dispatch (integration)', () => 
       },
     });
     const res = await post(body);
-    expect(res.status).not.toBe(501);
+    expect([200, 500]).toContain(res.status);
+    if (res.status === 200) {
+      const body = (await res.json()) as {
+        type: number;
+        data?: { content?: string; flags?: number };
+      };
+      expect(body.type).toBe(4);
+      expect(body.data?.flags).toBe(64);
+      expect(typeof body.data?.content).toBe('string');
+    }
   });
 
   it('returns 400 when payload is missing the type field', async () => {

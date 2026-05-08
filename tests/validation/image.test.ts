@@ -106,6 +106,40 @@ describe('validateImage', () => {
     });
     expect(result.ok).toBe(true);
   });
+
+  it('skips invalid aspect ratio entries gracefully', () => {
+    // First entry "1:invalid" is malformed (NaN denominator). The validator
+    // must not pass it as a match — only the well-formed "16:9" entry should
+    // count. A 16:9 attachment under this rule set should still validate ok.
+    const rules: FormatRules = {
+      ...baseRules,
+      aspectRatios: ['1:invalid', '16:9'],
+      aspectTolerance: 0.02,
+    };
+    const result = validateImage(rules, {
+      ...validAttachment,
+      width: 1600,
+      height: 900,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects when only malformed aspect ratio entries are present', () => {
+    const rules: FormatRules = {
+      ...baseRules,
+      aspectRatios: ['1:invalid', 'bogus'],
+      aspectTolerance: 0.02,
+    };
+    const result = validateImage(rules, {
+      ...validAttachment,
+      width: 1600,
+      height: 900,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('アスペクト比'))).toBe(true);
+    }
+  });
 });
 
 describe('validateMagicBytes', () => {

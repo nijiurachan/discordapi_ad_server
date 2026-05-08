@@ -154,28 +154,44 @@ export async function runSubmitModal(
   const ext = draft.imageKey.split('.').pop() ?? 'bin';
   const stagingKey = draft.imageKey;
   const finalKey = `ads/${adId}/orig.${ext}`;
-  await copyObject(deps.s3, deps.bucket, stagingKey, finalKey);
+  try {
+    await copyObject(deps.s3, deps.bucket, stagingKey, finalKey);
+  } catch (err) {
+    console.error('submit-modal: S3 copyObject failed', { stagingKey, finalKey, adId, err });
+    return ephemeral(c, '画像の本格保存に失敗しました。再度起稿してください。');
+  }
 
   // 8. INSERT ads
-  await deps.client.query(
-    `INSERT INTO ads
-       (id, sponsor_id, kind, slot, title, body, link_url,
-        image_key, image_mime, image_bytes, image_width, image_height, status)
-     VALUES ($1, $2, 'regular', $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')`,
-    [
-      adId,
-      draft.sponsorId,
-      draft.slot,
-      title,
-      body,
-      linkUrl,
-      finalKey,
-      draft.imageMime,
-      draft.imageBytes,
-      draft.imageWidth,
-      draft.imageHeight,
-    ],
-  );
+  try {
+    await deps.client.query(
+      `INSERT INTO ads
+         (id, sponsor_id, kind, slot, title, body, link_url,
+          image_key, image_mime, image_bytes, image_width, image_height, status)
+       VALUES ($1, $2, 'regular', $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')`,
+      [
+        adId,
+        draft.sponsorId,
+        draft.slot,
+        title,
+        body,
+        linkUrl,
+        finalKey,
+        draft.imageMime,
+        draft.imageBytes,
+        draft.imageWidth,
+        draft.imageHeight,
+      ],
+    );
+  } catch (err) {
+    console.error('submit-modal: ads INSERT failed', { adId, finalKey, err });
+    // Best-effort: clean up the orphaned ads/{adId}/orig object we just copied.
+    try {
+      await deleteObject(deps.s3, deps.bucket, finalKey);
+    } catch (cleanupErr) {
+      console.error('submit-modal: cleanup deleteObject failed', { finalKey, cleanupErr });
+    }
+    return ephemeral(c, '広告の登録に失敗しました。再度起稿してください。');
+  }
 
   // 9. delete draft row + staging object (best-effort: cron sweeps stragglers)
   await deps.client.query('DELETE FROM ad_drafts WHERE id = $1', [draftId]);

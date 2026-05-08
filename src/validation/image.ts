@@ -64,9 +64,15 @@ export function validateImage(rules: FormatRules, attachment: Attachment): Image
     const actual = attachment.width / attachment.height;
     const ok = rules.aspectRatios.some((r) => {
       const parts = r.split(':').map(Number);
+      // Skip malformed entries: must be exactly "W:H" with two numeric parts.
+      // A non-numeric part (e.g., "1:foo") yields NaN from Number(), and
+      // dividing by it produces NaN comparisons that silently succeed —
+      // explicitly reject so a typo in config can't pass validation.
+      if (parts.length !== 2) return false;
       const w = parts[0];
       const h = parts[1];
-      if (w === undefined || h === undefined || h === 0) return false;
+      if (w === undefined || h === undefined || Number.isNaN(w) || Number.isNaN(h) || h === 0)
+        return false;
       const target = w / h;
       return Math.abs(actual - target) / target <= rules.aspectTolerance;
     });

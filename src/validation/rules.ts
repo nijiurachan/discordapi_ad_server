@@ -41,7 +41,8 @@ export async function fetchFormatRules(
             link_domain_allowlist AS "linkDomainAllowlist",
             link_domain_blocklist AS "linkDomainBlocklist"
        FROM ad_format_rules
-      WHERE slot = $1`,
+      WHERE slot = $1
+      LIMIT 1`,
     [slot],
   );
   return res.rows[0] ?? null;

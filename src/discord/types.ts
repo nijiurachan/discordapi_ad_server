@@ -76,7 +76,9 @@ export type ModalComponentText = {
 
 export type ModalActionRow = {
   type: 1; // ACTION_ROW
-  components: ModalComponentText[];
+  // Discord requires each Modal ACTION_ROW to contain exactly one TEXT_INPUT.
+  // Encoding this at the type level catches malformed payloads at compile time.
+  components: readonly [ModalComponentText];
 };
 
 export type ModalSubmitInteractionPayload = {
@@ -111,7 +113,8 @@ export type ModalResponseTextInput = {
 
 export type ModalResponseActionRow = {
   type: 1; // ACTION_ROW
-  components: ModalResponseTextInput[];
+  // Same Discord rule as ModalActionRow: one TEXT_INPUT per ACTION_ROW.
+  components: readonly [ModalResponseTextInput];
 };
 
 export type ModalResponse = {

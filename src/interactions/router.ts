@@ -60,8 +60,10 @@ interactions.post('/', async (c) => {
       const cmd = parsed as ApplicationCommandInteractionPayload;
       if (cmd.data?.name === 'ad') {
         const opts = cmd.data.options ?? [];
-        const subcommand = opts[0];
-        if (subcommand && subcommand.type === 1 && subcommand.name === 'submit') {
+        // Forward-compatible: future subcommands like /ad list, /ad withdraw
+        // may sit alongside submit. Use Array.find rather than indexing opts[0].
+        const subcommand = opts.find((o) => o.type === 1 && o.name === 'submit');
+        if (subcommand) {
           return handleAdSubmit(c, cmd);
         }
       }
