@@ -33,7 +33,7 @@ export async function fetchFormatRules(
             min_height           AS "minHeight",
             max_height           AS "maxHeight",
             aspect_ratios        AS "aspectRatios",
-            aspect_tolerance::float AS "aspectTolerance",
+            COALESCE(aspect_tolerance::float, 0.02) AS "aspectTolerance",
             title_max_len        AS "titleMaxLen",
             body_max_len         AS "bodyMaxLen",
             link_url_max_len     AS "linkUrlMaxLen",

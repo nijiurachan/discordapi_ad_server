@@ -107,11 +107,14 @@ describe('validateImage', () => {
     }
   });
 
-  it('strips query strings from URL when extracting extension', () => {
+  it('extracts extension from URL when filename has no extension', () => {
+    // Force the URL-derived branch: `extractExtension(url) ?? extractExtension(filename)`
+    // — a filename without an extension makes the URL's query-strip logic the
+    // actual code path under test.
     const result = validateImage(baseRules, {
       ...validAttachment,
+      filename: '',
       url: 'https://example.com/foo.png?signed=xyz&t=123',
-      filename: 'foo.png',
     });
     expect(result.ok).toBe(true);
   });
@@ -137,6 +140,25 @@ describe('validateImage', () => {
     const rules: FormatRules = {
       ...baseRules,
       aspectRatios: ['1:invalid', 'bogus'],
+      aspectTolerance: 0.02,
+    };
+    const result = validateImage(rules, {
+      ...validAttachment,
+      width: 1600,
+      height: 900,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes('アスペクト比'))).toBe(true);
+    }
+  });
+
+  it('rejects malformed aspect ratio entries with negative or zero numbers', () => {
+    // Without the `w <= 0 || h <= 0` guard, a negative `target = w/h` flips the
+    // sign of `(actual - target)/target` and `<= tolerance` silently passes.
+    const rules: FormatRules = {
+      ...baseRules,
+      aspectRatios: ['-1:2', '1:-2', '0:1', '1:0'],
       aspectTolerance: 0.02,
     };
     const result = validateImage(rules, {

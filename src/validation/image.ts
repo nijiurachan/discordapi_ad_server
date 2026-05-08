@@ -74,7 +74,16 @@ export function validateImage(rules: FormatRules, attachment: Attachment): Image
       if (parts.length !== 2) return false;
       const w = parts[0];
       const h = parts[1];
-      if (w === undefined || h === undefined || Number.isNaN(w) || Number.isNaN(h) || h === 0)
+      // Reject zero or negative components — negative target would invert the
+      // sign of the ratio and `<= tolerance` would silently false-pass.
+      if (
+        w === undefined ||
+        h === undefined ||
+        Number.isNaN(w) ||
+        Number.isNaN(h) ||
+        w <= 0 ||
+        h <= 0
+      )
         return false;
       const target = w / h;
       return Math.abs(actual - target) / target <= rules.aspectTolerance;

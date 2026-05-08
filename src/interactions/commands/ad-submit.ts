@@ -29,6 +29,10 @@ const MIME_EXT: Record<DetectedMime, string> = {
   'image/webp': 'webp',
 };
 
+// Hard cap on Discord CDN image fetch. A hung response would otherwise block
+// the interaction handler past Discord's 3s ack window indefinitely.
+const IMAGE_FETCH_TIMEOUT_MS = 5000;
+
 export type AdSubmitDeps = {
   client: PgClient;
   rest: DiscordRest;
@@ -134,17 +138,24 @@ export async function runAdSubmit(
     return ephemeral(c, imgResult.errors.join('\n'));
   }
 
-  // 8. Fetch + magic bytes.
+  // 8. Fetch + magic bytes. Bound the fetch with an AbortController so a hung
+  // CDN response can't block the handler. AbortError is thrown into the catch
+  // and surfaces the same generic message to the user.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), IMAGE_FETCH_TIMEOUT_MS);
   let bodyBytes: Uint8Array;
   try {
-    const res = await fetchImpl(attachment.url);
+    const res = await fetchImpl(attachment.url, { signal: ctrl.signal });
     if (!res.ok) {
       return ephemeral(c, '画像の取得に失敗しました');
     }
     const buf = await res.arrayBuffer();
     bodyBytes = new Uint8Array(buf);
-  } catch {
+  } catch (err) {
+    console.error('ad-submit: image fetch failed', { url: attachment.url, err });
     return ephemeral(c, '画像の取得に失敗しました');
+  } finally {
+    clearTimeout(timer);
   }
   const detected = validateMagicBytes(bodyBytes);
   // Defensive parse: Discord usually sends a bare MIME, but content_type may
@@ -265,7 +276,9 @@ export async function handleAdSubmit(
 ): Promise<Response> {
   const guildId = payload.guild_id ?? c.env.GUILD_ID;
   if (!guildId) {
-    return c.json({ error: 'guild_id is required' }, 400);
+    // Discord interaction endpoints must reply with HTTP 200 + a callback body;
+    // a 400 here just shows "Interaction Failed" with no explanation.
+    return ephemeral(c, 'ギルド情報を取得できません。サーバー内で実行してください。');
   }
 
   const rest = createDiscordRest({ token: c.env.DISCORD_BOT_TOKEN });
