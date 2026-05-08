@@ -22,4 +22,8 @@ describe('createPgClient', () => {
   it('throws when url is empty', () => {
     expect(() => createPgClient('')).toThrow(/POSTGRES_URL/);
   });
+
+  it('throws when url is whitespace-only', () => {
+    expect(() => createPgClient('   ')).toThrow(/POSTGRES_URL/);
+  });
 });

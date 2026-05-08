@@ -11,34 +11,16 @@ type HealthChecks = {
 
 const PROBE_TIMEOUT_MS = 2000;
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    p.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (err) => {
-        clearTimeout(t);
-        reject(err);
-      },
-    );
-  });
-}
-
 export const health = new Hono<{ Bindings: Bindings }>();
 
 health.get('/', async (c) => {
   const checks: HealthChecks = { db: 'pending' };
   let overall: 'ok' | 'degraded' = 'ok';
 
+  // DB probe: pg.Pool's connectionTimeoutMillis + query_timeout cancel at the
+  // driver level so a hung connection cannot leak past the response.
   try {
-    await withTimeout(
-      withPgClient(c.env.POSTGRES_URL, (db) => db.query('SELECT 1')),
-      PROBE_TIMEOUT_MS,
-      'db probe',
-    );
+    await withPgClient(c.env.POSTGRES_URL, (db) => db.query('SELECT 1'));
     checks.db = 'ok';
   } catch (err) {
     console.error('health: db probe failed', err);
@@ -46,6 +28,10 @@ health.get('/', async (c) => {
     overall = 'degraded';
   }
 
+  // S3 probe: pass an AbortSignal so the AWS SDK aborts the in-flight HTTP
+  // request when the timeout fires (not just rejects a wrapper promise).
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
   try {
     const s3 = createS3Client({
       endpoint: c.env.S3_ENDPOINT,
@@ -53,16 +39,16 @@ health.get('/', async (c) => {
       accessKeyId: c.env.S3_ACCESS_KEY_ID,
       secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
     });
-    await withTimeout(
-      s3.send(new HeadBucketCommand({ Bucket: c.env.S3_BUCKET })),
-      PROBE_TIMEOUT_MS,
-      's3 probe',
-    );
+    await s3.send(new HeadBucketCommand({ Bucket: c.env.S3_BUCKET }), {
+      abortSignal: ctrl.signal,
+    });
     checks.s3 = 'ok';
   } catch (err) {
     console.error('health: s3 probe failed', err);
     checks.s3 = 'unavailable';
     overall = 'degraded';
+  } finally {
+    clearTimeout(timer);
   }
 
   return c.json(

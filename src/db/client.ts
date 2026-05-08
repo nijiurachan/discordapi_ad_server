@@ -5,9 +5,23 @@ export type PgClient = {
   end: () => Promise<void>;
 };
 
-export function createPgClient(url: string): PgClient {
-  if (!url) throw new Error('POSTGRES_URL is required');
-  const pool = new pg.Pool({ connectionString: url, max: 1 });
+export type CreatePgClientOptions = {
+  connectionTimeoutMillis?: number;
+  queryTimeoutMillis?: number;
+};
+
+const DEFAULT_TIMEOUT_MS = 3000;
+
+export function createPgClient(url: string, opts: CreatePgClientOptions = {}): PgClient {
+  if (!url || !url.trim()) {
+    throw new Error('POSTGRES_URL is required and must not be empty or whitespace');
+  }
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: 1,
+    connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
+    query_timeout: opts.queryTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
+  });
   return {
     query: pool.query.bind(pool),
     end: () => pool.end(),
