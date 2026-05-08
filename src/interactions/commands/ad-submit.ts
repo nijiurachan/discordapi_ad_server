@@ -16,7 +16,7 @@ import {
   countActiveAds,
   refreshSponsorTier,
 } from '../../sponsors/tier.ts';
-import { createS3Client, putObject } from '../../storage/s3.ts';
+import { createS3Client, deleteObject, putObject } from '../../storage/s3.ts';
 import { type DetectedMime, validateImage, validateMagicBytes } from '../../validation/image.ts';
 import { type FormatRules, fetchFormatRules } from '../../validation/rules.ts';
 import { ephemeral, modalResponse } from '../responses.ts';
@@ -170,23 +170,35 @@ export async function runAdSubmit(
     );
   }
 
-  // 10. Insert ad_drafts row (expires in 10 minutes).
-  await client.query(
-    `INSERT INTO ad_drafts
-       (id, sponsor_id, slot, image_key, image_mime, image_bytes,
-        image_width, image_height, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + interval '10 minutes')`,
-    [
-      draftId,
-      userId,
-      slot,
-      imageKey,
-      detected,
-      attachment.size,
-      attachment.width ?? null,
-      attachment.height ?? null,
-    ],
-  );
+  // 10. Insert ad_drafts row (expires in 10 minutes). If the INSERT fails
+  // after the staging upload succeeded, clean up the orphaned S3 object so
+  // the bucket doesn't accrue garbage on transient DB errors.
+  try {
+    await client.query(
+      `INSERT INTO ad_drafts
+         (id, sponsor_id, slot, image_key, image_mime, image_bytes,
+          image_width, image_height, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + interval '10 minutes')`,
+      [
+        draftId,
+        userId,
+        slot,
+        imageKey,
+        detected,
+        attachment.size,
+        attachment.width ?? null,
+        attachment.height ?? null,
+      ],
+    );
+  } catch (err) {
+    console.error('ad-submit: ad_drafts INSERT failed', { draftId, imageKey, err });
+    try {
+      await deleteObject(s3, bucket, imageKey);
+    } catch (cleanupErr) {
+      console.error('ad-submit: cleanup deleteObject failed', { imageKey, cleanupErr });
+    }
+    return ephemeral(c, '下書きの保存に失敗しました。再度起稿してください。');
+  }
 
   // 11. Return Modal response.
   const modal: ModalResponse = {

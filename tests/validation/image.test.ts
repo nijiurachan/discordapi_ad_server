@@ -49,6 +49,15 @@ describe('validateImage', () => {
     }
   });
 
+  it('normalizes content_type with parameters before checking allowedMimes', () => {
+    // Defensive normalization: strip "; charset=…" parameters and lowercase.
+    const result = validateImage(baseRules, {
+      ...validAttachment,
+      content_type: 'IMAGE/PNG; charset=utf-8',
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it('errors when extension is not allowed', () => {
     const result = validateImage(baseRules, {
       ...validAttachment,

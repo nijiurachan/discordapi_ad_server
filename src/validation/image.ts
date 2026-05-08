@@ -6,8 +6,11 @@ export type ImageValidationResult = { ok: true } | { ok: false; errors: string[]
 export function validateImage(rules: FormatRules, attachment: Attachment): ImageValidationResult {
   const errors: string[] = [];
 
-  // MIME check
-  const mime = attachment.content_type ?? '';
+  // MIME check. Defensively strip any parameter (e.g., "image/png; charset=utf-8")
+  // and lowercase before comparing — Discord normally sends a bare MIME, but the
+  // same hygiene we apply in ad-submit avoids surprises if that ever changes.
+  const rawMime = attachment.content_type ?? '';
+  const mime = rawMime.split(';')[0]?.trim().toLowerCase() ?? '';
   if (!rules.allowedMimes.includes(mime)) {
     errors.push(`画像 MIME タイプが許可されていません (${mime || '未設定'})`);
   }

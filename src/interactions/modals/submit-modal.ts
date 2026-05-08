@@ -135,25 +135,14 @@ export async function runSubmitModal(
   const linkResult = validateLinkUrl(rules, linkUrl);
   if (!linkResult.ok) return ephemeral(c, linkResult.error);
 
-  // 5. recheck max_active_ads (race-condition guard against the initial check)
-  const tierLimit = await fetchTierLimit(deps.client, draft.sponsorId);
-  if (tierLimit !== null) {
-    const activeCount = await countActiveAds(deps.client, draft.sponsorId);
-    if (activeCount >= tierLimit) {
-      return ephemeral(
-        c,
-        `現在のティアでは同時に最大 ${tierLimit} 件まで配信できます。（既に ${activeCount} 件あります）`,
-      );
-    }
-  }
-
-  // 6. generate ad_id
+  // 5. generate ad_id + compute keys (kept outside tx so we can clean up on failure).
   const adId = deps.uuid();
-
-  // 7. S3 copy staging → ads/{ad_id}/
   const ext = draft.imageKey.split('.').pop() ?? 'bin';
   const stagingKey = draft.imageKey;
   const finalKey = `ads/${adId}/orig.${ext}`;
+
+  // 6. S3 copy staging → ads/{ad_id}/  (BEFORE the transaction so we don't
+  // hold a pg connection during S3 I/O).
   try {
     await copyObject(deps.s3, deps.bucket, stagingKey, finalKey);
   } catch (err) {
@@ -161,8 +150,49 @@ export async function runSubmitModal(
     return ephemeral(c, '画像の本格保存に失敗しました。再度起稿してください。');
   }
 
-  // 8. INSERT ads
+  // 7. atomic block: lock draft row, recheck tier, INSERT ads, DELETE draft.
+  // SELECT ... FOR UPDATE on the draft row serializes concurrent modal
+  // submissions of the same draft. (Multi-draft per sponsor races remain
+  // a known limitation; see follow-up.)
+  let txOpen = false;
   try {
+    await deps.client.query('BEGIN');
+    txOpen = true;
+
+    const lockRes = await deps.client.query<{ id: string }>(
+      'SELECT id FROM ad_drafts WHERE id = $1 FOR UPDATE',
+      [draftId],
+    );
+    if (lockRes.rows.length === 0) {
+      await deps.client.query('ROLLBACK');
+      txOpen = false;
+      try {
+        await deleteObject(deps.s3, deps.bucket, finalKey);
+      } catch (cleanupErr) {
+        console.error('submit-modal: rollback cleanup failed', { finalKey, cleanupErr });
+      }
+      return ephemeral(c, '下書きが既に処理済みです。再度起稿してください。');
+    }
+
+    // Recheck tier limit inside the locked transaction.
+    const tierLimit = await fetchTierLimit(deps.client, draft.sponsorId);
+    if (tierLimit !== null) {
+      const activeCount = await countActiveAds(deps.client, draft.sponsorId);
+      if (activeCount >= tierLimit) {
+        await deps.client.query('ROLLBACK');
+        txOpen = false;
+        try {
+          await deleteObject(deps.s3, deps.bucket, finalKey);
+        } catch (cleanupErr) {
+          console.error('submit-modal: over-limit cleanup failed', { finalKey, cleanupErr });
+        }
+        return ephemeral(
+          c,
+          `現在のティアでは同時に最大 ${tierLimit} 件まで配信できます。（既に ${activeCount} 件あります）`,
+        );
+      }
+    }
+
     await deps.client.query(
       `INSERT INTO ads
          (id, sponsor_id, kind, slot, title, body, link_url,
@@ -182,26 +212,36 @@ export async function runSubmitModal(
         draft.imageHeight,
       ],
     );
+
+    await deps.client.query('DELETE FROM ad_drafts WHERE id = $1', [draftId]);
+
+    await deps.client.query('COMMIT');
+    txOpen = false;
   } catch (err) {
-    console.error('submit-modal: ads INSERT failed', { adId, finalKey, err });
-    // Best-effort: clean up the orphaned ads/{adId}/orig object we just copied.
+    console.error('submit-modal: transaction failed', { adId, finalKey, draftId, err });
+    if (txOpen) {
+      try {
+        await deps.client.query('ROLLBACK');
+      } catch (rbErr) {
+        console.error('submit-modal: ROLLBACK failed', rbErr);
+      }
+    }
     try {
       await deleteObject(deps.s3, deps.bucket, finalKey);
     } catch (cleanupErr) {
-      console.error('submit-modal: cleanup deleteObject failed', { finalKey, cleanupErr });
+      console.error('submit-modal: tx cleanup deleteObject failed', { finalKey, cleanupErr });
     }
     return ephemeral(c, '広告の登録に失敗しました。再度起稿してください。');
   }
 
-  // 9. delete draft row + staging object (best-effort: cron sweeps stragglers)
-  await deps.client.query('DELETE FROM ad_drafts WHERE id = $1', [draftId]);
+  // 8. best-effort: delete staging object (cron sweeps stragglers if this fails)
   try {
     await deleteObject(deps.s3, deps.bucket, stagingKey);
   } catch (err) {
     console.error('submit-modal: staging delete failed (cron will sweep)', err);
   }
 
-  // 10. post review embed (non-fatal: admin can re-trigger if it fails)
+  // 9. post review embed (non-fatal: admin can re-trigger if it fails)
   try {
     await postReviewEmbed({
       rest: deps.rest,
@@ -214,8 +254,9 @@ export async function runSubmitModal(
     console.error('submit-modal: review embed post failed', err);
   }
 
-  // 11. ephemeral confirmation
-  return ephemeral(c, '✅ 受付完了 — 結果は DM で通知します。');
+  // 10. ephemeral confirmation (DM notifications arrive in P3; for now we just
+  // confirm receipt without making a promise about delivery channel).
+  return ephemeral(c, '✅ 受付完了 — 審査結果が出ましたらお知らせします。');
 }
 
 /**

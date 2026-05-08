@@ -137,16 +137,27 @@ function defaultDeps(client: PgClient, rest = mockRest()): ModalSubmitDeps {
 describe('runSubmitModal', () => {
   it('happy path: returns ephemeral confirmation and inserts ads row', async () => {
     const captured: CapturedCall[] = [];
-    // 1) fetchDraft, 2) fetchFormatRules, 3) fetchTierLimit, 4) countActiveAds,
-    // 5) INSERT ads, 6) DELETE ad_drafts
+    // Tx-aware query order:
+    //   1) fetchDraft
+    //   2) fetchFormatRules
+    //   3) BEGIN
+    //   4) SELECT ... FOR UPDATE  (must return draft row)
+    //   5) fetchTierLimit
+    //   6) countActiveAds
+    //   7) INSERT ads
+    //   8) DELETE ad_drafts
+    //   9) COMMIT
     const client = mockClient(
       [
         { rows: [draftRow] },
         { rows: [formatRulesRow] },
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
         { rows: [{ max_active_ads: 5 }] },
         { rows: [{ count: '0' }] },
-        { rows: [] },
-        { rows: [] },
+        { rows: [] }, // INSERT
+        { rows: [] }, // DELETE
+        { rows: [] }, // COMMIT
       ],
       captured,
     );
@@ -157,6 +168,12 @@ describe('runSubmitModal', () => {
     expect(json.type).toBe(4);
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('受付完了');
+    expect(json.data.content).toContain('審査結果');
+
+    // Transaction control statements ran in order.
+    expect(captured.some((c) => /^BEGIN$/.test(c.sql.trim()))).toBe(true);
+    expect(captured.some((c) => /SELECT id FROM ad_drafts.*FOR UPDATE/i.test(c.sql))).toBe(true);
+    expect(captured.some((c) => /^COMMIT$/.test(c.sql.trim()))).toBe(true);
 
     const insert = captured.find((c) => /INSERT INTO ads/.test(c.sql));
     expect(insert).toBeDefined();
@@ -226,26 +243,84 @@ describe('runSubmitModal', () => {
   });
 
   it('returns ephemeral when active ads exceed tier limit (race-condition guard)', async () => {
-    const client = mockClient([
-      { rows: [draftRow] },
-      { rows: [formatRulesRow] },
-      { rows: [{ max_active_ads: 2 }] },
-      { rows: [{ count: '5' }] }, // already at/over limit
-    ]);
+    const captured: CapturedCall[] = [];
+    // Order with the tier recheck inside the tx:
+    //   1) fetchDraft, 2) fetchFormatRules, 3) BEGIN,
+    //   4) SELECT FOR UPDATE, 5) fetchTierLimit, 6) countActiveAds, 7) ROLLBACK
+    const client = mockClient(
+      [
+        { rows: [draftRow] },
+        { rows: [formatRulesRow] },
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
+        { rows: [{ max_active_ads: 2 }] },
+        { rows: [{ count: '5' }] }, // already at/over limit
+        { rows: [] }, // ROLLBACK
+      ],
+      captured,
+    );
     const res = await invoke(buildPayload(), defaultDeps(client));
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('最大');
+
+    // Transaction was rolled back — no INSERT and no COMMIT.
+    expect(captured.some((c) => /^ROLLBACK$/.test(c.sql.trim()))).toBe(true);
+    expect(captured.every((c) => !/^COMMIT$/.test(c.sql.trim()))).toBe(true);
+    expect(captured.every((c) => !/INSERT INTO ads/.test(c.sql))).toBe(true);
+  });
+
+  it('rolls back and cleans up finalKey when over-limit recheck fails inside the transaction', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [draftRow] },
+        { rows: [formatRulesRow] },
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
+        { rows: [{ max_active_ads: 1 }] },
+        { rows: [{ count: '3' }] }, // way over limit
+        { rows: [] }, // ROLLBACK
+      ],
+      captured,
+    );
+    // Track each S3 op so we can assert the cleanup DELETE happened on
+    // the freshly-copied finalKey.
+    const s3Calls: Array<{ kind: string; key: string }> = [];
+    const s3 = {
+      send: vi.fn(async (cmd: { constructor: { name: string }; input: { Key: string } }) => {
+        s3Calls.push({ kind: cmd.constructor.name, key: cmd.input.Key });
+        return {};
+      }),
+    } as unknown as S3Client;
+    const deps: ModalSubmitDeps = { ...defaultDeps(client), s3 };
+    const res = await invoke(buildPayload(), deps);
+    const json = (await res.json()) as { type: number; data: { content: string } };
+    expect(json.type).toBe(4);
+    expect(json.data.content).toContain('最大');
+
+    // ROLLBACK ran and no INSERT/COMMIT happened.
+    expect(captured.some((c) => /^ROLLBACK$/.test(c.sql.trim()))).toBe(true);
+    expect(captured.every((c) => !/^COMMIT$/.test(c.sql.trim()))).toBe(true);
+    expect(captured.every((c) => !/INSERT INTO ads/.test(c.sql))).toBe(true);
+
+    // S3: copy ads/.../orig.png happened, then cleanup delete on the same key.
+    const finalKey = 'ads/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/orig.png';
+    expect(s3Calls.some((c) => c.kind === 'CopyObjectCommand' && c.key === finalKey)).toBe(true);
+    expect(s3Calls.some((c) => c.kind === 'DeleteObjectCommand' && c.key === finalKey)).toBe(true);
   });
 
   it('still returns success even when review embed posting fails', async () => {
     const client = mockClient([
       { rows: [draftRow] },
       { rows: [formatRulesRow] },
+      { rows: [] }, // BEGIN
+      { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
       { rows: [{ max_active_ads: 5 }] },
       { rows: [{ count: '0' }] },
-      { rows: [] },
-      { rows: [] },
+      { rows: [] }, // INSERT
+      { rows: [] }, // DELETE
+      { rows: [] }, // COMMIT
     ]);
     const rest = {
       createMessage: vi.fn(async () => {
@@ -262,10 +337,13 @@ describe('runSubmitModal', () => {
     const client = mockClient([
       { rows: [draftRow] },
       { rows: [formatRulesRow] },
+      { rows: [] }, // BEGIN
+      { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
       { rows: [{ max_active_ads: 5 }] },
       { rows: [{ count: '0' }] },
-      { rows: [] },
-      { rows: [] },
+      { rows: [] }, // INSERT
+      { rows: [] }, // DELETE
+      { rows: [] }, // COMMIT
     ]);
     let sendCount = 0;
     const s3 = {
