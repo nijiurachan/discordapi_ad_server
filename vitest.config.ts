@@ -9,6 +9,8 @@ export default defineWorkersConfig({
           bindings: {
             DISCORD_APP_ID: 'test-app',
             DISCORD_APP_BOT_ID: 'test-bot',
+            // Arbitrary placeholder; tests inject the real public key per-request via
+            // X-Public-Key-Override (gated by TEST_OVERRIDE_ALLOWED='true' below).
             DISCORD_PUBLIC_KEY: '0'.repeat(64),
             DISCORD_BOT_TOKEN: 'test-token',
             GUILD_ID: 'test-guild',

@@ -14,6 +14,7 @@ describe('/health', () => {
     expect(body.service).toBe('discordapi_ad_server');
     expect(['ok', 'degraded']).toContain(body.status);
     expect(typeof body.checks.db).toBe('string');
+    expect(typeof body.checks.s3).toBe('string');
     expect(new Date(body.time).toString()).not.toBe('Invalid Date');
   });
 });

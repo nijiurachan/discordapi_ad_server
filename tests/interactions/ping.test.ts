@@ -1,10 +1,7 @@
 import { SELF } from 'cloudflare:test';
 import nacl from 'tweetnacl';
 import { describe, expect, it } from 'vitest';
-
-function toHex(u8: Uint8Array) {
-  return Array.from(u8, (b) => b.toString(16).padStart(2, '0')).join('');
-}
+import { toHex } from '../_helpers/hex.ts';
 
 const keypair = nacl.sign.keyPair();
 const publicKeyHex = toHex(keypair.publicKey);

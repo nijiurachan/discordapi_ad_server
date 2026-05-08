@@ -13,3 +13,15 @@ export function createPgClient(url: string): PgClient {
     end: () => pool.end(),
   };
 }
+
+export async function withPgClient<T>(
+  url: string,
+  fn: (client: PgClient) => Promise<T>,
+): Promise<T> {
+  const client = createPgClient(url);
+  try {
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
+}

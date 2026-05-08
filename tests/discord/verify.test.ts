@@ -1,10 +1,7 @@
 import nacl from 'tweetnacl';
 import { describe, expect, it } from 'vitest';
 import { verifyDiscordSignature } from '../../src/discord/verify.ts';
-
-function toHex(u8: Uint8Array) {
-  return Array.from(u8, (b) => b.toString(16).padStart(2, '0')).join('');
-}
+import { toHex } from '../_helpers/hex.ts';
 
 describe('verifyDiscordSignature', () => {
   const keypair = nacl.sign.keyPair();

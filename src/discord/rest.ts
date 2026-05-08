@@ -44,7 +44,7 @@ export function createDiscordRest(o: DiscordRestOptions) {
   const opts = { token: o.token, fetch: o.fetch ?? fetch };
   return {
     getChannel: (id: string) => request<Channel>(opts, 'GET', `/channels/${id}`),
-    deleteChannel: (id: string) => request<void>(opts, 'DELETE', `/channels/${id}`),
+    deleteChannel: (id: string) => request<Channel>(opts, 'DELETE', `/channels/${id}`),
     createDmChannel: (recipientId: string) =>
       request<Channel>(opts, 'POST', '/users/@me/channels', { recipient_id: recipientId }),
     createMessage: (channelId: string, body: Json) =>

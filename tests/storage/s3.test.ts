@@ -17,4 +17,22 @@ describe('createS3Client', () => {
       createS3Client({ endpoint: '', region: 'us-east-1', accessKeyId: 'a', secretAccessKey: 'b' }),
     ).toThrow(/endpoint/);
   });
+
+  it('throws when region is empty', () => {
+    expect(() =>
+      createS3Client({ endpoint: 'http://x', region: '', accessKeyId: 'a', secretAccessKey: 'b' }),
+    ).toThrow(/region/);
+  });
+
+  it('throws when accessKeyId is empty', () => {
+    expect(() =>
+      createS3Client({ endpoint: 'http://x', region: 'r', accessKeyId: '', secretAccessKey: 'b' }),
+    ).toThrow(/accessKeyId/);
+  });
+
+  it('throws when secretAccessKey is empty', () => {
+    expect(() =>
+      createS3Client({ endpoint: 'http://x', region: 'r', accessKeyId: 'a', secretAccessKey: '' }),
+    ).toThrow(/secretAccessKey/);
+  });
 });
