@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
+import type {
+  ApplicationCommandInteractionPayload,
+  ModalSubmitInteractionPayload,
+} from '../discord/types.ts';
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
+import { handleAdSubmit } from './commands/ad-submit.ts';
+import { handleSubmitModal } from './modals/submit-modal.ts';
 
 function isInteractionPayload(value: unknown): value is { type: number } {
   return (
@@ -46,10 +52,31 @@ interactions.post('/', async (c) => {
   }
   const payload = parsed;
 
-  if (payload.type === InteractionType.PING) {
-    return c.json({ type: InteractionResponseType.PONG });
-  }
+  switch (payload.type) {
+    case InteractionType.PING:
+      return c.json({ type: InteractionResponseType.PONG });
 
-  // P1 では PING のみ対応。それ以外は 501 でフェーズ未実装を示す。
-  return c.json({ error: 'not implemented in P1' }, 501);
+    case InteractionType.APPLICATION_COMMAND: {
+      const cmd = parsed as ApplicationCommandInteractionPayload;
+      if (cmd.data?.name === 'ad') {
+        const opts = cmd.data.options ?? [];
+        const subcommand = opts[0];
+        if (subcommand && subcommand.type === 1 && subcommand.name === 'submit') {
+          return handleAdSubmit(c, cmd);
+        }
+      }
+      return c.json({ error: 'unknown command' }, 501);
+    }
+
+    case InteractionType.MODAL_SUBMIT: {
+      const modal = parsed as ModalSubmitInteractionPayload;
+      if (typeof modal.data?.custom_id === 'string' && modal.data.custom_id.startsWith('submit:')) {
+        return handleSubmitModal(c, modal);
+      }
+      return c.json({ error: 'unknown modal' }, 501);
+    }
+
+    default:
+      return c.json({ error: 'not implemented' }, 501);
+  }
 });
