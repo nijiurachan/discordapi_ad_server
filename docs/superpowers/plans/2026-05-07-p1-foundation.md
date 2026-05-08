@@ -161,6 +161,7 @@ trim_trailing_whitespace = false
     "resolveJsonModule": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "noEmit": true,
     "jsx": "react-jsx",
@@ -177,6 +178,8 @@ trim_trailing_whitespace = false
 
 - [ ] **Step 5: `wrangler.toml` を作成**
 
+Wrangler の環境モデルでは top-level の `[triggers]` は `[env.*]` には継承されないので、staging / production にもそれぞれ triggers を定義する。
+
 ```toml
 name = "discordapi-ad-server"
 main = "src/index.ts"
@@ -192,8 +195,14 @@ crons = ["0 * * * *"]
 [env.staging]
 name = "discordapi-ad-server-staging"
 
+[env.staging.triggers]
+crons = ["0 * * * *"]
+
 [env.production]
 name = "discordapi-ad-server"
+
+[env.production.triggers]
+crons = ["0 * * * *"]
 ```
 
 - [ ] **Step 6: `.env.example` を作成（spec §8 と整合）**
@@ -575,6 +584,7 @@ export const adEvents = pgTable('ad_events', {
   slot: text('slot'),
 }, (t) => ({
   typeCheck: check('ad_events_type_check', sql`${t.eventType} IN ('impression','click')`),
+  adTsIdx: index('ad_events_ad_ts_idx').using('brin', t.adId, t.ts),
 }));
 
 export const reviewLogs = pgTable('review_logs', {
@@ -626,15 +636,19 @@ export const dmFallbackChannels = pgTable('dm_fallback_channels', {
 
 - [ ] **Step 2: `drizzle.config.ts` を作成**
 
+`process.env` への直接プロパティアクセスは TS の `noPropertyAccessFromIndexSignature` と biome の `useLiteralKeys` の両方に引っかかるため、destructuring で取り出す。
+
 ```ts
 import { defineConfig } from 'drizzle-kit';
+
+const { POSTGRES_URL } = process.env;
 
 export default defineConfig({
   schema: './src/db/schema.ts',
   out: './migrations',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.POSTGRES_URL ?? 'postgres://localhost/discordadserver',
+    url: POSTGRES_URL ?? 'postgres://localhost/discordadserver',
   },
   strict: true,
   verbose: true,
