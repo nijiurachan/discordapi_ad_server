@@ -170,7 +170,10 @@ describe('getAggregateStats', () => {
     );
     const res = await getAggregateStats(client, 'user-1', '24h');
     expect(res).toEqual({ impressions: 100, clicks: 10, ctr: 0.1, adCount: 3 });
-    expect(captured[0]?.sql).toContain("interval '24 hours'");
+    expect(captured[0]?.sql).toContain('ad_stats_daily');
+    expect(captured[0]?.sql).toContain('COALESCE(SUM(s.impressions), 0)');
+    expect(captured[0]?.sql).toContain('COALESCE(SUM(s.clicks), 0)');
+    expect(captured[0]?.sql).toContain("s.day >= now() - interval '24 hours'");
     expect(captured[0]?.params).toEqual(['user-1']);
   });
 
@@ -181,7 +184,8 @@ describe('getAggregateStats', () => {
       captured,
     );
     await getAggregateStats(client, 'user-1', '7d');
-    expect(captured[0]?.sql).toContain("interval '7 days'");
+    expect(captured[0]?.sql).toContain('ad_stats_daily');
+    expect(captured[0]?.sql).toContain("s.day >= now() - interval '7 days'");
   });
 
   it("includes 30d interval clause for period='30d'", async () => {
@@ -191,17 +195,20 @@ describe('getAggregateStats', () => {
       captured,
     );
     await getAggregateStats(client, 'user-1', '30d');
-    expect(captured[0]?.sql).toContain("interval '30 days'");
+    expect(captured[0]?.sql).toContain('ad_stats_daily');
+    expect(captured[0]?.sql).toContain("s.day >= now() - interval '30 days'");
   });
 
-  it("omits ts condition for period='all'", async () => {
+  it("omits day condition for period='all'", async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [{ rows: [{ impressions: '0', clicks: '0', ad_count: '0' }] }],
       captured,
     );
     await getAggregateStats(client, 'user-1', 'all');
+    expect(captured[0]?.sql).toContain('ad_stats_daily');
     expect(captured[0]?.sql).not.toContain('interval');
+    expect(captured[0]?.sql).not.toContain('s.day >=');
   });
 
   it('returns ctr=0 when impressions=0 (no divide-by-zero)', async () => {

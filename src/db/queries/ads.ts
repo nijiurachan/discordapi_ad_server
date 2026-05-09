@@ -146,18 +146,18 @@ export async function getAggregateStats(
   const interval = PERIOD_INTERVAL[period];
   // The interval string is hardcoded against a known finite set above; it is
   // never user input, so inlining it into the SQL is safe.
-  const tsCondition = interval ? `AND e.ts > now() - interval '${interval}'` : '';
+  const dayCondition = interval ? `AND s.day >= now() - interval '${interval}'` : '';
   const res = await client.query<{
     impressions: string;
     clicks: string;
     ad_count: string;
   }>(
     `SELECT
-       COUNT(*) FILTER (WHERE e.event_type = 'impression')::text AS impressions,
-       COUNT(*) FILTER (WHERE e.event_type = 'click')::text       AS clicks,
-       COUNT(DISTINCT a.id)::text                                  AS ad_count
+       COALESCE(SUM(s.impressions), 0)::text AS impressions,
+       COALESCE(SUM(s.clicks), 0)::text       AS clicks,
+       COUNT(DISTINCT a.id)::text             AS ad_count
      FROM ads a
-     LEFT JOIN ad_events e ON e.ad_id = a.id ${tsCondition}
+     LEFT JOIN ad_stats_daily s ON s.ad_id = a.id ${dayCondition}
      WHERE a.sponsor_id = $1
        AND a.kind <> 'placeholder'`,
     [sponsorId],
