@@ -1,6 +1,7 @@
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -72,4 +73,43 @@ export async function deleteObject(client: S3Client, bucket: string, key: string
       Key: key,
     }),
   );
+}
+
+export type S3GetObjectResult = {
+  body: ReadableStream;
+  contentType: string | undefined;
+  contentLength: number | undefined;
+  etag: string | undefined;
+};
+
+/**
+ * Fetch an object from S3. Returns null on 404; throws on other errors.
+ */
+export async function getObject(
+  client: S3Client,
+  bucket: string,
+  key: string,
+): Promise<S3GetObjectResult | null> {
+  try {
+    const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    if (!res.Body) return null;
+    // res.Body is a Readable in Node, ReadableStream in Workers. The SDK's
+    // ReadableStream type is the Web stream when running on Workers.
+    return {
+      body: res.Body as unknown as ReadableStream,
+      contentType: res.ContentType,
+      contentLength: res.ContentLength,
+      etag: res.ETag,
+    };
+  } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'name' in err &&
+      (err as { name: string }).name === 'NoSuchKey'
+    ) {
+      return null;
+    }
+    throw err;
+  }
 }
