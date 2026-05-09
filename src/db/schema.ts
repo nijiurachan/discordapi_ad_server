@@ -62,6 +62,7 @@ export const ads = pgTable(
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     startsAt: timestamp('starts_at', { withTimezone: true }),
     endsAt: timestamp('ends_at', { withTimezone: true }),
+    reviewMessageId: text('review_message_id'),
     createdByAdmin: text('created_by_admin'),
     dmDeliveryStatus: text('dm_delivery_status'),
     dmDeliveredAt: timestamp('dm_delivered_at', { withTimezone: true }),
