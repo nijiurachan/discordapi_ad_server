@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../../src/db/client.ts';
-import type { DiscordRest } from '../../../src/discord/rest.ts';
+import { type DiscordRest, DiscordRestError } from '../../../src/discord/rest.ts';
 import type { ModalSubmitInteractionPayload } from '../../../src/discord/types.ts';
 import type { Bindings } from '../../../src/env.ts';
 import {
@@ -29,9 +29,12 @@ function mockClient(
   };
 }
 
-function mockRest(): DiscordRest {
+function mockRest(overrides?: Partial<DiscordRest>): DiscordRest {
   return {
     editMessage: vi.fn(async () => ({ id: 'msg-1', channel_id: 'review-chan' })),
+    createDmChannel: vi.fn(async () => ({ id: 'dm-chan-1', type: 1 })),
+    createMessage: vi.fn(async () => ({ id: 'dm-msg-1', channel_id: 'dm-chan-1' })),
+    ...overrides,
   } as unknown as DiscordRest;
 }
 
@@ -105,14 +108,15 @@ function defaultDeps(client: PgClient, rest = mockRest()): RejectModalDeps {
 // --- tests ----------------------------------------------------------------
 
 describe('runRejectModal', () => {
-  it('happy path: status update, log insert, embed edit, ephemeral confirmation', async () => {
+  it('happy path: status update, log insert, embed edit, DM, ephemeral confirmation', async () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad row (fetchAdForOutcome)
     //   2) UPDATE ads (optimistic) — must report rowCount: 1
     //   3) INSERT review_logs
+    //   4) UPDATE ads SET dm_delivery_status='sent' (P3.4)
     const client = mockClient(
-      [{ rows: [adRow] }, { rows: [], rowCount: 1 }, { rows: [] }],
+      [{ rows: [adRow] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [], rowCount: 1 }],
       captured,
     );
     const rest = mockRest();
@@ -122,7 +126,7 @@ describe('runRejectModal', () => {
     expect(json.type).toBe(4);
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('却下を確定');
-    expect(json.data.content).toContain('P3.4');
+    expect(json.data.content).toContain('DM で起稿者に通知');
 
     // Optimistic UPDATE was called with `pending` filter and `rejected` target.
     const update = captured.find((c) => /UPDATE ads SET/.test(c.sql));
@@ -150,6 +154,43 @@ describe('runRejectModal', () => {
         components: [],
       }),
     );
+
+    // DM sent: createDmChannel + createMessage with reject embed.
+    expect(rest.createDmChannel).toHaveBeenCalledWith('sponsor-1');
+    expect(rest.createMessage).toHaveBeenCalledTimes(1);
+
+    // dm_delivery_status UPDATE captured with status='sent' and a Date.
+    const dmUpdate = captured.find((c) => /dm_delivery_status/.test(c.sql));
+    expect(dmUpdate).toBeDefined();
+    expect(dmUpdate?.params?.[0]).toBe('sent');
+    expect(dmUpdate?.params?.[1]).toBeInstanceOf(Date);
+    expect(dmUpdate?.params?.[2]).toBe(AD_ID);
+  });
+
+  it('blocked DM (403 from createDmChannel): ephemeral notes fallback pending, status=failed', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [adRow] },
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+        { rows: [], rowCount: 1 }, // dm UPDATE
+      ],
+      captured,
+    );
+    const rest = mockRest({
+      createDmChannel: vi.fn(async () => {
+        throw new DiscordRestError(403, 'Cannot send messages to this user');
+      }),
+    });
+    const res = await invoke(buildPayload(), defaultDeps(client, rest));
+    const json = (await res.json()) as { type: number; data: { content: string } };
+    expect(json.type).toBe(4);
+    expect(json.data.content).toContain('却下を確定');
+    expect(json.data.content).toContain('P3.5');
+    expect(rest.createMessage).not.toHaveBeenCalled();
+    const dmUpdate = captured.find((c) => /dm_delivery_status/.test(c.sql));
+    expect(dmUpdate?.params?.[0]).toBe('failed');
   });
 
   it('returns ephemeral permission error when member lacks reviewer role', async () => {
@@ -241,12 +282,17 @@ describe('runRejectModal', () => {
   });
 
   it('still returns success when embed edit fails (best-effort)', async () => {
-    const client = mockClient([{ rows: [adRow] }, { rows: [], rowCount: 1 }, { rows: [] }]);
-    const rest = {
+    const client = mockClient([
+      { rows: [adRow] },
+      { rows: [], rowCount: 1 },
+      { rows: [] },
+      { rows: [], rowCount: 1 },
+    ]);
+    const rest = mockRest({
       editMessage: vi.fn(async () => {
         throw new Error('discord 500');
       }),
-    } as unknown as DiscordRest;
+    });
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
@@ -258,6 +304,7 @@ describe('runRejectModal', () => {
       { rows: [{ ...adRow, review_message_id: null }] },
       { rows: [], rowCount: 1 },
       { rows: [] },
+      { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));

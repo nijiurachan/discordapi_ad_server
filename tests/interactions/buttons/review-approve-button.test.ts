@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../../src/db/client.ts';
-import type { DiscordRest } from '../../../src/discord/rest.ts';
+import { type DiscordRest, DiscordRestError } from '../../../src/discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../../src/discord/types.ts';
 import type { Bindings } from '../../../src/env.ts';
 import {
@@ -29,9 +29,12 @@ function mockClient(
   };
 }
 
-function mockRest(): DiscordRest {
+function mockRest(overrides?: Partial<DiscordRest>): DiscordRest {
   return {
     editMessage: vi.fn(async () => ({ id: 'msg-1', channel_id: 'review-chan' })),
+    createDmChannel: vi.fn(async () => ({ id: 'dm-chan-1', type: 1 })),
+    createMessage: vi.fn(async () => ({ id: 'dm-msg-1', channel_id: 'dm-chan-1' })),
+    ...overrides,
   } as unknown as DiscordRest;
 }
 
@@ -99,15 +102,22 @@ function defaultDeps(client: PgClient, rest = mockRest()): ApproveButtonDeps {
 // --- tests ----------------------------------------------------------------
 
 describe('runApproveButton', () => {
-  it('happy path: snapshot + tier lookup + UPDATE w/ weight_snapshot + log + embed edit', async () => {
+  it('happy path: snapshot + tier lookup + UPDATE w/ weight_snapshot + log + embed edit + DM', async () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad snapshot (handler)
     //   2) SELECT ad+tier weight (service lookup)
     //   3) UPDATE ads (optimistic) — rowCount: 1
     //   4) INSERT review_logs
+    //   5) UPDATE ads SET dm_delivery_status='sent' (P3.4)
     const client = mockClient(
-      [{ rows: [adRow] }, { rows: [tierRow] }, { rows: [], rowCount: 1 }, { rows: [] }],
+      [
+        { rows: [adRow] },
+        { rows: [tierRow] },
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+        { rows: [], rowCount: 1 },
+      ],
       captured,
     );
     const rest = mockRest();
@@ -118,7 +128,7 @@ describe('runApproveButton', () => {
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('承認を確定');
     expect(json.data.content).toContain('weight=7');
-    expect(json.data.content).toContain('P3.4');
+    expect(json.data.content).toContain('DM で起稿者に通知');
 
     // Snapshot SELECT — non-JOIN form on ads.
     const snapshotQ = captured.find((c) => /FROM ads\b/.test(c.sql) && !/FROM ads a/.test(c.sql));
@@ -156,6 +166,44 @@ describe('runApproveButton', () => {
         components: [],
       }),
     );
+
+    // DM sent: createDmChannel + createMessage with approve embed.
+    expect(rest.createDmChannel).toHaveBeenCalledWith('sponsor-1');
+    expect(rest.createMessage).toHaveBeenCalledTimes(1);
+
+    // dm_delivery_status UPDATE captured with status='sent' and a Date.
+    const dmUpdate = captured.find((c) => /dm_delivery_status/.test(c.sql));
+    expect(dmUpdate).toBeDefined();
+    expect(dmUpdate?.params?.[0]).toBe('sent');
+    expect(dmUpdate?.params?.[1]).toBeInstanceOf(Date);
+    expect(dmUpdate?.params?.[2]).toBe(AD_ID);
+  });
+
+  it('blocked DM (403 from createDmChannel): ephemeral notes fallback pending, status=failed', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [adRow] },
+        { rows: [tierRow] },
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+        { rows: [], rowCount: 1 }, // dm UPDATE
+      ],
+      captured,
+    );
+    const rest = mockRest({
+      createDmChannel: vi.fn(async () => {
+        throw new DiscordRestError(403, 'Cannot send messages to this user');
+      }),
+    });
+    const res = await invoke(buildPayload(), defaultDeps(client, rest));
+    const json = (await res.json()) as { type: number; data: { content: string } };
+    expect(json.type).toBe(4);
+    expect(json.data.content).toContain('承認を確定');
+    expect(json.data.content).toContain('P3.5');
+    expect(rest.createMessage).not.toHaveBeenCalled();
+    const dmUpdate = captured.find((c) => /dm_delivery_status/.test(c.sql));
+    expect(dmUpdate?.params?.[0]).toBe('failed');
   });
 
   it('returns ephemeral permission error when member lacks reviewer role', async () => {
@@ -236,12 +284,13 @@ describe('runApproveButton', () => {
       { rows: [tierRow] },
       { rows: [], rowCount: 1 },
       { rows: [] },
+      { rows: [], rowCount: 1 },
     ]);
-    const rest = {
+    const rest = mockRest({
       editMessage: vi.fn(async () => {
         throw new Error('discord 500');
       }),
-    } as unknown as DiscordRest;
+    });
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
@@ -255,6 +304,7 @@ describe('runApproveButton', () => {
       { rows: [tierRow] },
       { rows: [], rowCount: 1 },
       { rows: [] },
+      { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));

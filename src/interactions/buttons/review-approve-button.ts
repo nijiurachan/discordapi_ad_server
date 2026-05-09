@@ -5,6 +5,7 @@ import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { approveAd } from '../../services/review/approve.ts';
+import { sendResultDM } from '../../services/review/dm.ts';
 import { isReviewer } from '../../sponsors/reviewer-auth.ts';
 import { ephemeral } from '../responses.ts';
 
@@ -131,10 +132,37 @@ export async function runApproveButton(
     }
   }
 
-  return ephemeral(
-    c,
-    `✅ 承認を確定しました。weight=${result.weightSnapshot} を凍結しました。（DM 通知は P3.4 で実装予定）`,
-  );
+  // Send DM (P3.4). The fallback channel post for blocked DMs ships in P3.5.
+  let dmStatus: 'sent' | 'blocked' | 'no_sponsor' | 'rest_error' = 'rest_error';
+  if (ad.sponsorId) {
+    const dmResult = await sendResultDM({
+      rest: deps.rest,
+      client: deps.client,
+      ad: {
+        id: ad.id,
+        slot: ad.slot,
+        title: ad.title,
+        weightSnapshot: result.weightSnapshot,
+        startsAt: new Date(),
+      },
+      sponsorId: ad.sponsorId,
+      action: 'approved',
+    });
+    dmStatus = dmResult.ok ? 'sent' : dmResult.reason;
+  } else {
+    dmStatus = 'no_sponsor';
+  }
+
+  const dmNote =
+    dmStatus === 'sent'
+      ? 'DM で起稿者に通知しました。'
+      : dmStatus === 'blocked'
+        ? '起稿者の DM がオフのため、フォールバックチャンネル投稿は P3.5 で対応します。'
+        : dmStatus === 'no_sponsor'
+          ? '（house/placeholder のため DM 送信なし）'
+          : '⚠ DM 送信時にエラーが発生しました（ログ参照）。';
+
+  return ephemeral(c, `✅ 承認を確定しました。weight=${result.weightSnapshot} を凍結。${dmNote}`);
 }
 
 /**
