@@ -27,6 +27,7 @@ export default defineWorkersConfig({
             S3_ACCESS_KEY_ID: 'test',
             S3_SECRET_ACCESS_KEY: 'test',
             IP_HASH_SALT_BOOTSTRAP: 'test-salt',
+            IMPRESSION_TOKEN_SECRET: 'test-impression-secret-do-not-use-in-prod',
             WORKER_BASE_URL: 'http://localhost:8787',
             TEST_OVERRIDE_ALLOWED: 'true',
           },

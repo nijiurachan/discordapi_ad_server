@@ -18,6 +18,7 @@ export type Bindings = {
   S3_SECRET_ACCESS_KEY: string;
   SITE_API_KEY?: string;
   IP_HASH_SALT_BOOTSTRAP: string;
+  IMPRESSION_TOKEN_SECRET: string;
   WORKER_BASE_URL: string;
   TEST_OVERRIDE_ALLOWED?: string;
 };
