@@ -50,7 +50,10 @@ function buildEnv(): Bindings {
     S3_ACCESS_KEY_ID: 'k',
     S3_SECRET_ACCESS_KEY: 's',
     IP_HASH_SALT_BOOTSTRAP: 'salt',
+    IMPRESSION_TOKEN_SECRET: 'impression-secret',
     WORKER_BASE_URL: 'https://worker.example',
+    SERVE_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
   };
 }
 

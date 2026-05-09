@@ -1,3 +1,7 @@
+export type RateLimitBinding = {
+  limit(args: { key: string }): Promise<{ success: boolean }>;
+};
+
 export type Bindings = {
   DISCORD_APP_ID: string;
   DISCORD_APP_BOT_ID: string;
@@ -18,6 +22,9 @@ export type Bindings = {
   S3_SECRET_ACCESS_KEY: string;
   SITE_API_KEY?: string;
   IP_HASH_SALT_BOOTSTRAP: string;
+  IMPRESSION_TOKEN_SECRET: string;
   WORKER_BASE_URL: string;
   TEST_OVERRIDE_ALLOWED?: string;
+  SERVE_RATE_LIMITER: RateLimitBinding;
+  CLICK_RATE_LIMITER: RateLimitBinding;
 };
