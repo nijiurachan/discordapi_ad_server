@@ -97,7 +97,7 @@ export async function runAdSubmit(
   }
 
   // 3. Fallback gate.
-  const fb = await blockIfUnackedFallback(client, userId);
+  const fb = await blockIfUnackedFallback({ client, rest, sponsorId: userId });
   if (!fb.ok) {
     return ephemeral(c, fb.message);
   }
