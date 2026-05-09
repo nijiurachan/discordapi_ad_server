@@ -6,6 +6,39 @@ export const InteractionType = {
   MODAL_SUBMIT: 5,
 } as const;
 
+export const ComponentType = {
+  ACTION_ROW: 1,
+  BUTTON: 2,
+  STRING_SELECT: 3,
+  TEXT_INPUT: 4,
+  CHANNEL_SELECT: 8,
+} as const;
+export type ComponentType = (typeof ComponentType)[keyof typeof ComponentType];
+
+export const ButtonStyle = {
+  PRIMARY: 1,
+  SECONDARY: 2,
+  SUCCESS: 3,
+  DANGER: 4,
+  LINK: 5,
+} as const;
+export type ButtonStyle = (typeof ButtonStyle)[keyof typeof ButtonStyle];
+
+export type ButtonComponent = {
+  type: 2; // BUTTON
+  style: ButtonStyle;
+  custom_id?: string;
+  label?: string;
+  emoji?: { name: string };
+  url?: string;
+  disabled?: boolean;
+};
+
+export type ActionRowComponent = {
+  type: 1; // ACTION_ROW
+  components: ButtonComponent[];
+};
+
 export const InteractionResponseType = {
   PONG: 1,
   CHANNEL_MESSAGE_WITH_SOURCE: 4,
@@ -121,4 +154,21 @@ export type ModalResponse = {
   custom_id: string;
   title: string;
   components: ModalResponseActionRow[];
+};
+
+// Message component (button click) interaction payload
+export type MessageComponentInteractionPayload = {
+  type: typeof InteractionType.MESSAGE_COMPONENT;
+  id: string;
+  application_id: string;
+  guild_id?: string;
+  channel_id?: string;
+  member?: { user: { id: string; username?: string }; roles?: string[] };
+  user?: { id: string; username?: string };
+  data: {
+    custom_id: string;
+    component_type: number;
+    values?: string[];
+  };
+  message?: { id: string; channel_id: string };
 };

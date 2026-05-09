@@ -46,6 +46,31 @@ const commands = [
       },
     ],
   },
+  {
+    name: 'ad-setup',
+    description: '常設メニューを指定チャンネルに投稿',
+    type: 1,
+    default_member_permissions: '8', // ADMINISTRATOR (1 << 3)
+    options: [
+      {
+        name: 'channel',
+        description: 'メニューを投稿するチャンネル',
+        type: 7, // CHANNEL
+        required: true,
+      },
+      {
+        name: 'kind',
+        description: 'メニューの種類',
+        type: 3, // STRING
+        required: true,
+        choices: [
+          { name: 'submit', value: 'submit' },
+          { name: 'review', value: 'review' },
+          { name: 'admin', value: 'admin' },
+        ],
+      },
+    ],
+  },
 ];
 
 const url = `https://discord.com/api/v10/applications/${DISCORD_APP_ID}/guilds/${GUILD_ID}/commands`;

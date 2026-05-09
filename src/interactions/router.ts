@@ -6,6 +6,7 @@ import type {
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
+import { handleAdSetup } from './commands/ad-setup.ts';
 import { handleAdSubmit } from './commands/ad-submit.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
 
@@ -66,6 +67,10 @@ interactions.post('/', async (c) => {
         if (subcommand) {
           return handleAdSubmit(c, cmd);
         }
+        return c.json({ error: 'unknown ad subcommand' }, 501);
+      }
+      if (cmd.data?.name === 'ad-setup') {
+        return handleAdSetup(c, cmd);
       }
       return c.json({ error: 'unknown command' }, 501);
     }
