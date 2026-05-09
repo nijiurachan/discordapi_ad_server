@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import { withPgClient } from '../db/client.ts';
+import { insertAdEvent, isRecentEvent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
+import { shouldRecordEvent } from '../utils/event-filter.ts';
 import { hashIP } from '../utils/ip-hash.ts';
+import { getDailySalt } from '../utils/salt.ts';
 import { handleClick } from './click.ts';
 import { handleImage } from './image.ts';
-import { serveAds } from './pick.ts';
+import { type ServedAd, serveAds } from './pick.ts';
 import { clickRateLimit, serveRateLimit } from './rate-limit.ts';
 import { requireSiteKey } from './site-key.ts';
 import { generateImpressionToken } from './token.ts';
@@ -57,6 +60,13 @@ serveRouter.get('/serve', async (c) => {
     }),
   );
 
+  // Track impressions (fire-and-forget; doesn't block the response).
+  const ua = c.req.header('user-agent') ?? null;
+  const method = c.req.method;
+  if (shouldRecordEvent({ method, ua })) {
+    c.executionCtx.waitUntil(trackImpressions(c.env, ads, slot, ip, ua));
+  }
+
   return c.json({
     slot,
     served_at: servedAt.toISOString(),
@@ -66,3 +76,40 @@ serveRouter.get('/serve', async (c) => {
 
 serveRouter.get('/image/:adId', handleImage);
 serveRouter.get('/click/:adId', handleClick);
+
+/**
+ * Insert one impression row per non-placeholder served ad. Called via
+ * `executionCtx.waitUntil` so the response isn't blocked. Errors are swallowed
+ * (logged only) — tracking must never break delivery.
+ */
+export async function trackImpressions(
+  env: Bindings,
+  ads: ServedAd[],
+  slot: string,
+  ip: string,
+  ua: string | null,
+): Promise<void> {
+  // Filter out placeholder kinds before any DB work (spec §5.6).
+  const trackable = ads.filter((a) => a.kind !== 'placeholder');
+  if (trackable.length === 0) return;
+
+  try {
+    await withPgClient(env.POSTGRES_URL, async (client) => {
+      const salt = await getDailySalt(client, env.IP_HASH_SALT_BOOTSTRAP);
+      const ipHash = await hashIP(ip, salt);
+      for (const ad of trackable) {
+        const dup = await isRecentEvent(client, ad.id, ipHash, 'impression');
+        if (dup) continue;
+        await insertAdEvent(client, {
+          adId: ad.id,
+          eventType: 'impression',
+          ipHash,
+          ua,
+          slot,
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('serve: impression tracking failed', { err });
+  }
+}

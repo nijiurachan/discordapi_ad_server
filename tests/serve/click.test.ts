@@ -22,7 +22,7 @@ describe('isValidAdId', () => {
 });
 
 describe('getAdLinkUrl', () => {
-  function makeClient(rows: Array<{ link_url: string }>) {
+  function makeClient(rows: Array<{ link_url: string; kind: string }>) {
     return {
       query: vi.fn(async () => ({ rows })),
       end: vi.fn(async () => {}),
@@ -34,9 +34,28 @@ describe('getAdLinkUrl', () => {
     expect(await getAdLinkUrl(client, 'id')).toBeNull();
   });
 
-  it('returns the link_url when row present', async () => {
-    const client = makeClient([{ link_url: 'https://example.com/landing' }]);
-    expect(await getAdLinkUrl(client, 'id')).toBe('https://example.com/landing');
+  it('returns linkUrl + kind when row present', async () => {
+    const client = makeClient([{ link_url: 'https://example.com/landing', kind: 'regular' }]);
+    expect(await getAdLinkUrl(client, 'id')).toEqual({
+      linkUrl: 'https://example.com/landing',
+      kind: 'regular',
+    });
+  });
+
+  it('preserves house kind', async () => {
+    const client = makeClient([{ link_url: 'https://example.com/h', kind: 'house' }]);
+    expect(await getAdLinkUrl(client, 'id')).toEqual({
+      linkUrl: 'https://example.com/h',
+      kind: 'house',
+    });
+  });
+
+  it('preserves placeholder kind', async () => {
+    const client = makeClient([{ link_url: 'https://example.com/p', kind: 'placeholder' }]);
+    expect(await getAdLinkUrl(client, 'id')).toEqual({
+      linkUrl: 'https://example.com/p',
+      kind: 'placeholder',
+    });
   });
 });
 
