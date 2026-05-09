@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { withPgClient } from '../db/client.ts';
 import type { Bindings } from '../env.ts';
 import { hashIP } from '../utils/ip-hash.ts';
+import { handleClick } from './click.ts';
 import { handleImage } from './image.ts';
 import { serveAds } from './pick.ts';
 import { generateImpressionToken } from './token.ts';
@@ -57,3 +58,4 @@ serveRouter.get('/serve', async (c) => {
 });
 
 serveRouter.get('/image/:adId', handleImage);
+serveRouter.get('/click/:adId', handleClick);
