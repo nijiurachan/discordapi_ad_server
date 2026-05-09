@@ -28,7 +28,7 @@
 7. `tests/interactions/commands/ad-setup.test.ts` (新) — メニュー投稿、置換、permission check、kind 不正値
 
 ### 設計判断
-- 権限制御は Discord 側（`default_member_permissions: '8'`）に委譲。ハンドラ側で再チェックは不要（Discord が UI レベルで非表示にする）。ただし防御的に member.roles を 1 度確認するのは可。
+- 権限制御は Discord 側（`default_member_permissions: '8'`）の UI gating + サーバ側 `member.permissions` ADMINISTRATOR ビットチェックの二段構え（defense in depth）で実装。
 - 古いメッセージ削除が 404 で失敗した場合は warn ログのみ（既に消えているため）。
 
 ---

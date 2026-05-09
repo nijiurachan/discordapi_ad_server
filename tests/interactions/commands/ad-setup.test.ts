@@ -29,9 +29,11 @@ function buildPayload(overrides?: {
   kind?: string | undefined;
   omitChannel?: boolean;
   omitKind?: boolean;
+  permissions?: string;
 }): ApplicationCommandInteractionPayload {
   const channel = overrides?.channel ?? 'chan-target';
   const kind = overrides?.kind ?? 'submit';
+  const permissions = overrides?.permissions ?? '8'; // ADMINISTRATOR
   const options: { name: string; type: number; value: string }[] = [];
   if (!overrides?.omitChannel) {
     options.push({ name: 'channel', type: 7, value: channel });
@@ -45,7 +47,7 @@ function buildPayload(overrides?: {
     application_id: 'app-1',
     guild_id: 'guild-1',
     channel_id: 'chan-1',
-    member: { user: { id: 'admin-1', username: 'admin' }, roles: [] },
+    member: { user: { id: 'admin-1', username: 'admin' }, roles: [], permissions },
     data: {
       id: 'cmd-1',
       name: 'ad-setup',
@@ -253,5 +255,24 @@ describe('runAdSetup', () => {
     expect(json.data.content).toContain('channel');
     expect(json.data.content).toContain('kind');
     expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-admin invocations (permissions=0)', async () => {
+    const client = mockClient([]);
+    const createMessage = vi.fn(async () => ({ id: 'x', channel_id: 'y' }));
+    const deleteMessage = vi.fn(async () => undefined);
+    const rest = { createMessage, deleteMessage } as unknown as DiscordRest;
+
+    const res = await invoke(buildPayload({ permissions: '0' }), {
+      rest,
+      client,
+      actorId: 'admin-1',
+    });
+    const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
+    expect(json.type).toBe(4);
+    expect(json.data.flags).toBe(64);
+    expect(json.data.content).toContain('Administrator');
+    expect(createMessage).not.toHaveBeenCalled();
+    expect(deleteMessage).not.toHaveBeenCalled();
   });
 });

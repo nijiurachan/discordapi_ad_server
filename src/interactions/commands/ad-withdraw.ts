@@ -12,7 +12,7 @@ export type AdWithdrawDeps = {
   client: PgClient;
 };
 
-const UUID_RE = /^[0-9a-f-]{36}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function runAdWithdraw(
   c: Context,

@@ -42,9 +42,15 @@ export async function runAdList(c: Context, userId: string, deps: AdListDeps): P
   // Build embeds (one per ad, max 5)
   const embeds = await Promise.all(
     ads.map(async (ad) => {
-      const imageUrl = ad.imageKey
-        ? await presign(deps.s3, deps.bucket, ad.imageKey, deps.presignTtlSeconds)
-        : null;
+      let imageUrl: string | null = null;
+      if (ad.imageKey) {
+        try {
+          imageUrl = await presign(deps.s3, deps.bucket, ad.imageKey, deps.presignTtlSeconds);
+        } catch (err) {
+          console.warn('ad-list: presign failed', { adId: ad.id, key: ad.imageKey, err });
+          imageUrl = null;
+        }
+      }
       const fields = [
         { name: 'ステータス', value: statusLabel(ad.status), inline: true },
         { name: 'スロット', value: ad.slot, inline: true },

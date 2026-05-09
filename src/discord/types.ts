@@ -24,15 +24,30 @@ export const ButtonStyle = {
 } as const;
 export type ButtonStyle = (typeof ButtonStyle)[keyof typeof ButtonStyle];
 
-export type ButtonComponent = {
+type BaseButtonProps = {
   type: 2; // BUTTON
-  style: ButtonStyle;
-  custom_id?: string;
   label?: string;
   emoji?: { name: string };
-  url?: string;
   disabled?: boolean;
 };
+
+export type LinkButtonComponent = BaseButtonProps & {
+  style: typeof ButtonStyle.LINK; // 5
+  url: string;
+  // custom_id intentionally absent
+};
+
+export type InteractiveButtonComponent = BaseButtonProps & {
+  style:
+    | typeof ButtonStyle.PRIMARY
+    | typeof ButtonStyle.SECONDARY
+    | typeof ButtonStyle.SUCCESS
+    | typeof ButtonStyle.DANGER;
+  custom_id: string;
+  // url intentionally absent
+};
+
+export type ButtonComponent = LinkButtonComponent | InteractiveButtonComponent;
 
 export type ActionRowComponent = {
   type: 1; // ACTION_ROW
@@ -90,6 +105,7 @@ export type ApplicationCommandInteractionPayload = {
   member?: {
     user: { id: string; username?: string };
     roles?: string[];
+    permissions?: string;
   };
   user?: { id: string; username?: string };
   data: {
@@ -163,7 +179,11 @@ export type MessageComponentInteractionPayload = {
   application_id: string;
   guild_id?: string;
   channel_id?: string;
-  member?: { user: { id: string; username?: string }; roles?: string[] };
+  member?: {
+    user: { id: string; username?: string };
+    roles?: string[];
+    permissions?: string;
+  };
   user?: { id: string; username?: string };
   data: {
     custom_id: string;

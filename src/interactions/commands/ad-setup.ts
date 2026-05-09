@@ -15,6 +15,17 @@ export type AdSetupDeps = {
   actorId: string;
 };
 
+const ADMINISTRATOR_BIT = 0x8n;
+
+function hasAdministrator(permissions: string | undefined): boolean {
+  if (!permissions) return false;
+  try {
+    return (BigInt(permissions) & ADMINISTRATOR_BIT) !== 0n;
+  } catch {
+    return false;
+  }
+}
+
 type MenuKind = 'submit' | 'review' | 'admin';
 
 const MESSAGE_KEY: Record<MenuKind, string> = {
@@ -55,6 +66,9 @@ export async function runAdSetup(
   payload: ApplicationCommandInteractionPayload,
   deps: AdSetupDeps,
 ): Promise<Response> {
+  if (!hasAdministrator(payload.member?.permissions)) {
+    return ephemeral(c, '⚠ この操作には Administrator 権限が必要です。');
+  }
   const opts = payload.data.options ?? [];
   const channelOpt = opts.find((o) => o.name === 'channel');
   const kindOpt = opts.find((o) => o.name === 'kind');

@@ -95,4 +95,27 @@ describe('runAdWithdraw', () => {
     expect(json.data.content).toContain('広告 ID');
     expect(captured).toHaveLength(0);
   });
+
+  it('rejects malformed UUID with wrong hyphen positions', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient([], captured);
+    // 36 chars, no hyphens at canonical positions
+    const malformed = '0000000000000000000000000000000000aa';
+    expect(malformed).toHaveLength(36);
+    const res = await invoke(client, 'user-1', malformed);
+    const json = (await res.json()) as { data: { content: string; flags: number } };
+    expect(json.data.flags).toBe(64);
+    expect(json.data.content).toContain('広告 ID');
+    expect(captured).toHaveLength(0);
+  });
+
+  it('rejects UUID with extra characters (non-hex)', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient([], captured);
+    // 'g' is not hex
+    const res = await invoke(client, 'user-1', 'g0000000-0000-0000-0000-000000000000');
+    const json = (await res.json()) as { data: { content: string } };
+    expect(json.data.content).toContain('広告 ID');
+    expect(captured).toHaveLength(0);
+  });
 });

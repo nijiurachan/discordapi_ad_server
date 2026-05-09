@@ -101,7 +101,7 @@ export async function withdrawAd(
     await client.query(
       `UPDATE ads
           SET status = 'withdrawn',
-              ends_at = COALESCE(ends_at, now())
+              ends_at = now()
         WHERE id = $1`,
       [adId],
     );

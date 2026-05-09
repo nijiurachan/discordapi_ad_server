@@ -100,6 +100,51 @@ describe('runAdList', () => {
     expect(json.data.components).toHaveLength(2);
   });
 
+  it('continues building embeds when one presign throws', async () => {
+    const client = mockClient([
+      {
+        rows: [
+          makeAdRow({ id: 'ad-1', status: 'pending', image_key: 'staging/1/orig.png' }),
+          makeAdRow({ id: 'ad-2', status: 'approved', image_key: 'staging/2/orig.jpg' }),
+          makeAdRow({ id: 'ad-3', status: 'paused', image_key: 'staging/3/orig.png' }),
+        ],
+      },
+    ]);
+    let callIdx = 0;
+    const presign = vi.fn(async (_s3, _bucket, key: string) => {
+      callIdx += 1;
+      if (callIdx === 2) throw new Error('presign blew up');
+      return `https://signed/${key}`;
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const res = await invoke({
+        client,
+        s3: mockS3(),
+        bucket: 'b',
+        presignTtlSeconds: 300,
+        presignImpl: presign,
+      });
+      const json = (await res.json()) as {
+        type: number;
+        data: {
+          flags: number;
+          embeds: { title: string; image?: { url: string } }[];
+          components: unknown[];
+        };
+      };
+      expect(json.type).toBe(4);
+      expect(json.data.embeds).toHaveLength(3);
+      expect(json.data.embeds[0]?.image?.url).toBe('https://signed/staging/1/orig.png');
+      expect(json.data.embeds[1]?.image).toBeUndefined();
+      expect(json.data.embeds[2]?.image?.url).toBe('https://signed/staging/3/orig.png');
+      expect(presign).toHaveBeenCalledTimes(3);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it('5 ads → "直近 5 件" notice and only withdrawable ads get a button row', async () => {
     const rows = [
       makeAdRow({ id: 'ad-1', status: 'pending' }),
