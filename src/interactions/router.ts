@@ -7,12 +7,14 @@ import type {
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
+import { handleReviewRejectButton } from './buttons/review-reject-button.ts';
 import { handleAdList } from './commands/ad-list.ts';
 import { handleAdRules } from './commands/ad-rules.ts';
 import { handleAdSetup } from './commands/ad-setup.ts';
 import { handleAdStatsButton, handleAdStatsCommand } from './commands/ad-stats.ts';
 import { handleAdSubmit } from './commands/ad-submit.ts';
 import { handleAdWithdrawButton, handleAdWithdrawCommand } from './commands/ad-withdraw.ts';
+import { handleRejectModal } from './modals/review-reject-modal.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
 import { ephemeral } from './responses.ts';
 
@@ -121,15 +123,21 @@ interactions.post('/', async (c) => {
         return c.json({ error: 'review approve handler ships in P3.3' }, 501);
       }
       if (cid.startsWith('review:reject:')) {
-        return c.json({ error: 'review reject handler ships in P3.2' }, 501);
+        return handleReviewRejectButton(c, mc);
       }
       return c.json({ error: 'unknown component' }, 501);
     }
 
     case InteractionType.MODAL_SUBMIT: {
       const modal = parsed as ModalSubmitInteractionPayload;
-      if (typeof modal.data?.custom_id === 'string' && modal.data.custom_id.startsWith('submit:')) {
-        return handleSubmitModal(c, modal);
+      const modalCid = modal.data?.custom_id;
+      if (typeof modalCid === 'string') {
+        if (modalCid.startsWith('submit:')) {
+          return handleSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith('review-reject-modal:')) {
+          return handleRejectModal(c, modal);
+        }
       }
       return c.json({ error: 'unknown modal' }, 501);
     }
