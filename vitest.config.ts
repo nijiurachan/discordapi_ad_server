@@ -31,6 +31,10 @@ export default defineWorkersConfig({
             WORKER_BASE_URL: 'http://localhost:8787',
             TEST_OVERRIDE_ALLOWED: 'true',
           },
+          ratelimits: {
+            SERVE_RATE_LIMITER: { simple: { limit: 60, period: 60 } },
+            CLICK_RATE_LIMITER: { simple: { limit: 10, period: 60 } },
+          },
         },
       },
     },

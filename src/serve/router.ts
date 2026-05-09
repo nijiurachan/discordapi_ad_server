@@ -5,9 +5,16 @@ import { hashIP } from '../utils/ip-hash.ts';
 import { handleClick } from './click.ts';
 import { handleImage } from './image.ts';
 import { serveAds } from './pick.ts';
+import { clickRateLimit, serveRateLimit } from './rate-limit.ts';
+import { requireSiteKey } from './site-key.ts';
 import { generateImpressionToken } from './token.ts';
 
 export const serveRouter = new Hono<{ Bindings: Bindings }>();
+
+// /ads/serve: optional site-key validation + per-IP rate limit (60/min).
+serveRouter.use('/serve', requireSiteKey, serveRateLimit);
+// /ads/click/:adId: per-IP+adId rate limit (10/min). No site key (clicks come from third-party HTML).
+serveRouter.use('/click/:adId', clickRateLimit);
 
 const MAX_N = 5;
 

@@ -52,6 +52,8 @@ function buildEnv(): Bindings {
     IP_HASH_SALT_BOOTSTRAP: 'salt',
     IMPRESSION_TOKEN_SECRET: 'impression-secret',
     WORKER_BASE_URL: 'https://worker.example',
+    SERVE_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
   };
 }
 
