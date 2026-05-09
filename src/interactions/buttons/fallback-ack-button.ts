@@ -42,10 +42,24 @@ export async function runAckButton(
     return ephemeral(c, 'このボタンを押せるのは対象のスポンサーのみです。');
   }
 
-  await markFallbackAcknowledged(deps.client, fallbackId);
-  await setDmDeliveryStatus(deps.client, row.adId, 'fallback_acknowledged');
+  // Atomic: ack mark + dm_delivery_status transition. If either fails, the
+  // sponsor can re-click 了解 and the row stays in its previous state.
+  await deps.client.query('BEGIN');
+  try {
+    await markFallbackAcknowledged(deps.client, fallbackId);
+    await setDmDeliveryStatus(deps.client, row.adId, 'fallback_acknowledged');
+    await deps.client.query('COMMIT');
+  } catch (err) {
+    try {
+      await deps.client.query('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
 
-  // Best-effort channel delete
+  // Best-effort channel delete (after COMMIT — orphan deletion shouldn't roll
+  // back the ack)
   try {
     await deps.rest.deleteChannel(row.channelId);
   } catch (err) {

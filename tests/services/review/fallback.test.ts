@@ -135,7 +135,7 @@ describe('createOrReuseFallbackChannel — happy path (no existing row)', () => 
     expect(overwrites).toHaveLength(3);
     expect(overwrites[0]).toEqual({ id: GUILD_ID, type: 0, deny: '1024' });
     expect(overwrites[1]).toEqual({ id: SPONSOR_ID, type: 1, allow: '66560' });
-    expect(overwrites[2]).toEqual({ id: BOT_ID, type: 1, allow: '84992' });
+    expect(overwrites[2]).toEqual({ id: BOT_ID, type: 1, allow: '76800' });
 
     // INSERT into dm_fallback_channels with all 5 columns and expires_at ~7 days
     const insert = captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql));
@@ -290,16 +290,20 @@ describe('createOrReuseFallbackChannel — failures', () => {
     expect(captured.find((c) => /dm_delivery_status/.test(c.sql))).toBeUndefined();
   });
 
-  it('createMessage on new channel fails: row was inserted but no dm_delivery_status UPDATE; returns rest_error', async () => {
+  it('createMessage on new channel fails: marks row acknowledged + deletes channel; returns rest_error', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const captured: CapturedCall[] = [];
-    // SELECT empty + INSERT row succeeds + (no UPDATE because message fails)
-    const client = mockClient([{ rows: [] }, { rows: [], rowCount: 1 }], captured);
+    // SELECT empty + INSERT row succeeds + UPDATE acknowledged_at (compensating)
+    const client = mockClient(
+      [{ rows: [] }, { rows: [], rowCount: 1 }, { rows: [], rowCount: 1 }],
+      captured,
+    );
     const rest = {
       createGuildChannel: vi.fn(async () => ({ id: NEW_CHAN_ID, type: 0 })),
       createMessage: vi.fn(async () => {
         throw new DiscordRestError(500, 'cannot post');
       }),
+      deleteChannel: vi.fn(async () => ({ id: NEW_CHAN_ID, type: 0 })),
     } as unknown as DiscordRest;
 
     const result = await createOrReuseFallbackChannel(defaultArgs({ client, rest }));
@@ -307,8 +311,55 @@ describe('createOrReuseFallbackChannel — failures', () => {
     if (!result.ok) {
       expect(result.reason).toBe('rest_error');
     }
-    // INSERT did happen (TTL sweep will clean up) but no dm_delivery_status UPDATE.
+    // INSERT happened, then a compensating UPDATE acknowledged_at on the same row.
     expect(captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql))).toBeDefined();
+    const ackUpdate = captured.find((c) =>
+      /UPDATE dm_fallback_channels SET acknowledged_at/.test(c.sql),
+    );
+    expect(ackUpdate).toBeDefined();
+    expect(ackUpdate?.params?.[0]).toBe(FALLBACK_ID);
+    // No dm_delivery_status UPDATE because the post failed.
+    expect(captured.find((c) => /dm_delivery_status/.test(c.sql))).toBeUndefined();
+    // Channel was deleted to clean up the orphan.
+    expect(rest.deleteChannel).toHaveBeenCalledTimes(1);
+    expect((rest.deleteChannel as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(
+      NEW_CHAN_ID,
+    );
+  });
+
+  it('createFallbackRow fails: deletes the orphan channel and returns rest_error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const captured: CapturedCall[] = [];
+    // SELECT empty + INSERT throws.
+    const client: PgClient = {
+      query: vi.fn(async (sql: string, params?: unknown[]) => {
+        captured.push({ sql, params });
+        if (/INSERT INTO dm_fallback_channels/.test(sql)) {
+          throw new Error('FK violation');
+        }
+        return { rows: [], rowCount: 0 };
+      }) as unknown as PgClient['query'],
+      end: vi.fn(async () => undefined),
+    };
+    const rest = {
+      createGuildChannel: vi.fn(async () => ({ id: NEW_CHAN_ID, type: 0 })),
+      createMessage: vi.fn(),
+      deleteChannel: vi.fn(async () => ({ id: NEW_CHAN_ID, type: 0 })),
+    } as unknown as DiscordRest;
+
+    const result = await createOrReuseFallbackChannel(defaultArgs({ client, rest }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('rest_error');
+    }
+    // createMessage never reached.
+    expect(rest.createMessage).not.toHaveBeenCalled();
+    // Channel was deleted to clean up the orphan.
+    expect(rest.deleteChannel).toHaveBeenCalledTimes(1);
+    expect((rest.deleteChannel as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe(
+      NEW_CHAN_ID,
+    );
+    // No dm_delivery_status UPDATE.
     expect(captured.find((c) => /dm_delivery_status/.test(c.sql))).toBeUndefined();
   });
 });

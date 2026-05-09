@@ -26,14 +26,14 @@
 **スコープ:** Embed builder 群、ボタン components、`MESSAGE_COMPONENT` dispatcher、楽観ロック付き status UPDATE ヘルパー。実際の承認/却下ビジネスロジックは P3.3/3.2 で実装。
 
 **新規 / 変更:**
-- `migrations/0003_add_review_message_id.sql` — `ads.review_message_id` (TEXT, nullable) を追加
+- `migrations/0003_review_message_id.sql` — `ads.review_message_id` (TEXT, nullable) を追加
 - `src/db/schema.ts` — drizzle 反映
 - `src/discord/embeds/review.ts` (新) — `buildReviewEmbed(ad, sponsor)`, `buildReviewOutcomeEmbed(ad, action, reviewerId, reason?)`, `buildReviewButtons(adId)` の 3 関数
 - `src/db/queries/review.ts` (新) — `updateAdStatusOptimistic(client, adId, fromStatus, patch)` (楽観ロック)、`insertReviewLog(client, adId, reviewerId, action, reason?)`
 - `src/discord/review-embed.ts` — `postReviewEmbed` を更新し、message_id を返却 (caller が `ads.review_message_id` に保存)
 - `src/interactions/modals/submit-modal.ts` — `postReviewEmbed` 戻り値を `ads.review_message_id` に永続化
 - `src/interactions/router.ts` — MESSAGE_COMPONENT で `review:approve:*` / `review:reject:*` の prefix 仮 dispatch 経路を追加（実装は次 commit）
-- `src/sponsors/reviewer-auth.ts` (新) — `verifyReviewer(payload, reviewerRoleId)` ヘルパー、ephemeral 拒否レスポンス
+- `src/sponsors/reviewer-auth.ts` (新) — `isReviewer(payload, reviewerRoleId)` ヘルパー、ephemeral 拒否レスポンス
 - `tests/discord/embeds/review.test.ts`, `tests/db/queries/review.test.ts`
 
 **custom_id 規約:**
@@ -47,9 +47,9 @@
 **スコープ:** Reject ボタン押下時に Modal を返却し、Modal 提出を処理して `status='rejected'` + `reject_reason` 更新、Embed を outcome 表示に編集、review_logs INSERT。
 
 **新規 / 変更:**
-- `src/interactions/buttons/review-reject-button.ts` (新) — Reject ボタン押下 → Modal を返す。custom_id `reject-modal:{adId}`
+- `src/interactions/buttons/review-reject-button.ts` (新) — Reject ボタン押下 → Modal を返す。custom_id `review-reject-modal:{adId}`
 - `src/interactions/modals/review-reject-modal.ts` (新) — Modal 提出受信 → サーバ側で再検証（10–500 字） → status update + log insert + Embed 編集
-- `src/interactions/router.ts` — `review:reject:*` ボタン → reject button handler、`reject-modal:*` MODAL_SUBMIT → reject modal handler の dispatch を追加
+- `src/interactions/router.ts` — `review:reject:*` ボタン → reject button handler、`review-reject-modal:*` MODAL_SUBMIT → reject modal handler の dispatch を追加
 - `tests/interactions/buttons/review-reject-button.test.ts`, `tests/interactions/modals/review-reject-modal.test.ts`
 
 **Modal 仕様:**

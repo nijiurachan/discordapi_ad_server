@@ -1,7 +1,7 @@
 export const PermissionBit = {
   VIEW_CHANNEL: 0x400n, // 1024
   SEND_MESSAGES: 0x800n, // 2048
-  MANAGE_MESSAGES: 0x4000n, // 16384
+  MANAGE_MESSAGES: 0x2000n, // 8192
   READ_MESSAGE_HISTORY: 0x10000n, // 65536
 } as const;
 
@@ -16,7 +16,7 @@ export const PERM_ALLOW_BOT = (
   PermissionBit.SEND_MESSAGES |
   PermissionBit.READ_MESSAGE_HISTORY |
   PermissionBit.MANAGE_MESSAGES
-).toString(); // '84992'
+).toString(); // '76800'
 
 export type PermissionOverwrite = {
   id: string;

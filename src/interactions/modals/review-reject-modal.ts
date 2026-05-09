@@ -117,16 +117,29 @@ export async function runRejectModal(
 
   // Optimistic status transition: pending → rejected. Returns 'race' if some
   // other reviewer already moved this ad out of `pending`.
-  const updateResult = await updateAdStatusOptimistic(deps.client, adId, 'pending', {
-    status: 'rejected',
-    rejectReason: reason,
-    reviewedBy: reviewerId,
-  });
-  if (!updateResult.ok) {
-    return ephemeral(c, '他のレビュアーが既に処理しました。');
+  // UPDATE + log INSERT run in a single transaction so a partial failure can't
+  // leave the ad rejected without a corresponding review_logs entry.
+  await deps.client.query('BEGIN');
+  try {
+    const updateResult = await updateAdStatusOptimistic(deps.client, adId, 'pending', {
+      status: 'rejected',
+      rejectReason: reason,
+      reviewedBy: reviewerId,
+    });
+    if (!updateResult.ok) {
+      await deps.client.query('ROLLBACK');
+      return ephemeral(c, '他のレビュアーが既に処理しました。');
+    }
+    await insertReviewLog(deps.client, adId, reviewerId, 'rejected', reason);
+    await deps.client.query('COMMIT');
+  } catch (err) {
+    try {
+      await deps.client.query('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw err;
   }
-
-  await insertReviewLog(deps.client, adId, reviewerId, 'rejected', reason);
 
   // Best-effort: edit the original review embed so the channel reflects the
   // outcome. A failure here doesn't roll back the rejection — admins can

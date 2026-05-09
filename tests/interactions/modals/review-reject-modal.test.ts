@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../../src/db/client.ts';
 import { type DiscordRest, DiscordRestError } from '../../../src/discord/rest.ts';
 import type { ModalSubmitInteractionPayload } from '../../../src/discord/types.ts';
@@ -116,15 +116,28 @@ function defaultDeps(client: PgClient, rest = mockRest()): RejectModalDeps {
 // --- tests ----------------------------------------------------------------
 
 describe('runRejectModal', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('happy path: status update, log insert, embed edit, DM, ephemeral confirmation', async () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad row (fetchAdForOutcome)
-    //   2) UPDATE ads (optimistic) — must report rowCount: 1
-    //   3) INSERT review_logs
-    //   4) UPDATE ads SET dm_delivery_status='sent' (P3.4)
+    //   2) BEGIN
+    //   3) UPDATE ads (optimistic) — must report rowCount: 1
+    //   4) INSERT review_logs
+    //   5) COMMIT
+    //   6) UPDATE ads SET dm_delivery_status='sent' (P3.4)
     const client = mockClient(
-      [{ rows: [adRow] }, { rows: [], rowCount: 1 }, { rows: [] }, { rows: [], rowCount: 1 }],
+      [
+        { rows: [adRow] },
+        { rows: [] }, // BEGIN
+        { rows: [], rowCount: 1 },
+        { rows: [] }, // INSERT review_logs
+        { rows: [] }, // COMMIT
+        { rows: [], rowCount: 1 },
+      ],
       captured,
     );
     const rest = mockRest();
@@ -179,17 +192,21 @@ describe('runRejectModal', () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad
-    //   2) UPDATE ads (reject)
-    //   3) INSERT review_logs
-    //   4) UPDATE ads SET dm_delivery_status='failed' (DM blocked)
-    //   5) SELECT findActiveFallback — empty
-    //   6) INSERT dm_fallback_channels
-    //   7) UPDATE ads SET dm_delivery_status='fallback_posted'
+    //   2) BEGIN
+    //   3) UPDATE ads (reject)
+    //   4) INSERT review_logs
+    //   5) COMMIT
+    //   6) UPDATE ads SET dm_delivery_status='failed' (DM blocked)
+    //   7) SELECT findActiveFallback — empty
+    //   8) INSERT dm_fallback_channels
+    //   9) UPDATE ads SET dm_delivery_status='fallback_posted'
     const client = mockClient(
       [
         { rows: [adRow] },
+        { rows: [] }, // BEGIN
         { rows: [], rowCount: 1 },
-        { rows: [] },
+        { rows: [] }, // INSERT review_logs
+        { rows: [] }, // COMMIT
         { rows: [], rowCount: 1 },
         { rows: [] },
         { rows: [], rowCount: 1 },
@@ -229,8 +246,10 @@ describe('runRejectModal', () => {
     const client = mockClient(
       [
         { rows: [adRow] },
+        { rows: [] }, // BEGIN
         { rows: [], rowCount: 1 },
-        { rows: [] },
+        { rows: [] }, // INSERT review_logs
+        { rows: [] }, // COMMIT
         { rows: [], rowCount: 1 },
         { rows: [] }, // findActiveFallback empty
       ],
@@ -329,7 +348,9 @@ describe('runRejectModal', () => {
     const client = mockClient(
       [
         { rows: [adRow] },
-        { rows: [], rowCount: 0 }, // already moved by another reviewer
+        { rows: [] }, // BEGIN
+        { rows: [], rowCount: 0 }, // UPDATE — already moved by another reviewer
+        { rows: [] }, // ROLLBACK
       ],
       captured,
     );
@@ -346,8 +367,10 @@ describe('runRejectModal', () => {
   it('still returns success when embed edit fails (best-effort)', async () => {
     const client = mockClient([
       { rows: [adRow] },
+      { rows: [] }, // BEGIN
       { rows: [], rowCount: 1 },
-      { rows: [] },
+      { rows: [] }, // INSERT review_logs
+      { rows: [] }, // COMMIT
       { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest({
@@ -364,8 +387,10 @@ describe('runRejectModal', () => {
   it('skips embed edit when review_message_id is missing', async () => {
     const client = mockClient([
       { rows: [{ ...adRow, review_message_id: null }] },
+      { rows: [] }, // BEGIN
       { rows: [], rowCount: 1 },
-      { rows: [] },
+      { rows: [] }, // INSERT review_logs
+      { rows: [] }, // COMMIT
       { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest();

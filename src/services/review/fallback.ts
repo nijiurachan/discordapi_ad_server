@@ -1,5 +1,9 @@
 import type { PgClient } from '../../db/client.ts';
-import { createFallbackRow, findActiveFallback } from '../../db/queries/fallback.ts';
+import {
+  createFallbackRow,
+  findActiveFallback,
+  markFallbackAcknowledged,
+} from '../../db/queries/fallback.ts';
 import {
   type ResultDmAdInfo,
   buildApproveDmEmbed,
@@ -123,13 +127,27 @@ export async function createOrReuseFallbackChannel(
   // Persist row before posting message — if message post fails, the cron
   // sweep (P7) will still clean up the orphaned channel via TTL.
   const expiresAt = new Date(Date.now() + FALLBACK_TTL_DAYS * MS_PER_DAY);
-  await createFallbackRow(args.client, {
-    id: fallbackId,
-    adId: args.ad.id,
-    sponsorId: args.sponsorId,
-    channelId,
-    expiresAt,
-  });
+  try {
+    await createFallbackRow(args.client, {
+      id: fallbackId,
+      adId: args.ad.id,
+      sponsorId: args.sponsorId,
+      channelId,
+      expiresAt,
+    });
+  } catch (err) {
+    console.error('fallback: createFallbackRow failed; cleaning up channel', {
+      adId: args.ad.id,
+      channelId,
+      err,
+    });
+    try {
+      await args.rest.deleteChannel(channelId);
+    } catch (delErr) {
+      console.error('fallback: rollback deleteChannel failed', { channelId, delErr });
+    }
+    return { ok: false, reason: 'rest_error', error: err };
+  }
 
   // Post the result Embed + ack button
   let messageId: string;
@@ -146,6 +164,18 @@ export async function createOrReuseFallbackChannel(
       channelId,
       err,
     });
+    // Compensating cleanup: mark the row acknowledged so it doesn't block
+    // future submits, and delete the empty channel.
+    try {
+      await markFallbackAcknowledged(args.client, fallbackId);
+    } catch (mErr) {
+      console.error('fallback: cleanup mark failed', { fallbackId, mErr });
+    }
+    try {
+      await args.rest.deleteChannel(channelId);
+    } catch (dErr) {
+      console.error('fallback: cleanup deleteChannel failed', { channelId, dErr });
+    }
     return { ok: false, reason: 'rest_error', error: err };
   }
 

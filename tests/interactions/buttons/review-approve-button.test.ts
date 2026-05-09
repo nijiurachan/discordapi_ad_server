@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../../src/db/client.ts';
 import { type DiscordRest, DiscordRestError } from '../../../src/discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../../src/discord/types.ts';
@@ -110,20 +110,31 @@ function defaultDeps(client: PgClient, rest = mockRest()): ApproveButtonDeps {
 // --- tests ----------------------------------------------------------------
 
 describe('runApproveButton', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('happy path: snapshot + tier lookup + UPDATE w/ weight_snapshot + log + embed edit + DM', async () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad snapshot (handler)
     //   2) SELECT ad+tier weight (service lookup)
-    //   3) UPDATE ads (optimistic) — rowCount: 1
-    //   4) INSERT review_logs
-    //   5) UPDATE ads SET dm_delivery_status='sent' (P3.4)
+    //   3) BEGIN (approveAd transaction)
+    //   4) UPDATE ads (optimistic) — rowCount: 1
+    //   5) SELECT starts_at
+    //   6) INSERT review_logs
+    //   7) COMMIT
+    //   8) UPDATE ads SET dm_delivery_status='sent' (P3.4)
+    const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
         { rows: [adRow] },
         { rows: [tierRow] },
+        { rows: [] }, // BEGIN
         { rows: [], rowCount: 1 },
-        { rows: [] },
+        { rows: [{ starts_at: persistedStartsAt }] },
+        { rows: [] }, // INSERT review_logs
+        { rows: [] }, // COMMIT
         { rows: [], rowCount: 1 },
       ],
       captured,
@@ -138,8 +149,11 @@ describe('runApproveButton', () => {
     expect(json.data.content).toContain('weight=7');
     expect(json.data.content).toContain('DM で起稿者に通知');
 
-    // Snapshot SELECT — non-JOIN form on ads.
-    const snapshotQ = captured.find((c) => /FROM ads\b/.test(c.sql) && !/FROM ads a/.test(c.sql));
+    // Snapshot SELECT — non-JOIN form on ads, includes review_message_id column.
+    const snapshotQ = captured.find(
+      (c) =>
+        /FROM ads\b/.test(c.sql) && !/FROM ads a/.test(c.sql) && /review_message_id/.test(c.sql),
+    );
     expect(snapshotQ).toBeDefined();
     expect(snapshotQ?.params).toEqual([AD_ID]);
 
@@ -192,18 +206,25 @@ describe('runApproveButton', () => {
     // Query order:
     //   1) SELECT ad snapshot
     //   2) SELECT tier
-    //   3) UPDATE ads (approve)
-    //   4) INSERT review_logs
-    //   5) UPDATE ads SET dm_delivery_status='failed' (DM blocked)
-    //   6) SELECT findActiveFallback — empty
-    //   7) INSERT dm_fallback_channels
-    //   8) UPDATE ads SET dm_delivery_status='fallback_posted'
+    //   3) BEGIN
+    //   4) UPDATE ads (approve)
+    //   5) SELECT starts_at
+    //   6) INSERT review_logs
+    //   7) COMMIT
+    //   8) UPDATE ads SET dm_delivery_status='failed' (DM blocked)
+    //   9) SELECT findActiveFallback — empty
+    //  10) INSERT dm_fallback_channels
+    //  11) UPDATE ads SET dm_delivery_status='fallback_posted'
+    const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
         { rows: [adRow] },
         { rows: [tierRow] },
+        { rows: [] }, // BEGIN
         { rows: [], rowCount: 1 },
-        { rows: [] },
+        { rows: [{ starts_at: persistedStartsAt }] },
+        { rows: [] }, // INSERT review_logs
+        { rows: [] }, // COMMIT
         { rows: [], rowCount: 1 },
         { rows: [] },
         { rows: [], rowCount: 1 },
@@ -244,13 +265,18 @@ describe('runApproveButton', () => {
   it('blocked DM + createGuildChannel fails: ephemeral notes failure', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const captured: CapturedCall[] = [];
-    // Query order: snapshot, tier, UPDATE, INSERT log, dm UPDATE (failed), SELECT findActiveFallback (empty)
+    // Query order: snapshot, tier, BEGIN, UPDATE, SELECT starts_at, INSERT log,
+    // COMMIT, dm UPDATE (failed), SELECT findActiveFallback (empty)
+    const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
         { rows: [adRow] },
         { rows: [tierRow] },
+        { rows: [] }, // BEGIN
         { rows: [], rowCount: 1 },
-        { rows: [] },
+        { rows: [{ starts_at: persistedStartsAt }] },
+        { rows: [] }, // INSERT review_logs
+        { rows: [] }, // COMMIT
         { rows: [], rowCount: 1 },
         { rows: [] },
       ],
@@ -335,7 +361,9 @@ describe('runApproveButton', () => {
       [
         { rows: [adRow] },
         { rows: [tierRow] },
-        { rows: [], rowCount: 0 }, // already moved
+        { rows: [] }, // BEGIN
+        { rows: [], rowCount: 0 }, // UPDATE — already moved
+        { rows: [] }, // ROLLBACK
       ],
       captured,
     );
@@ -350,11 +378,15 @@ describe('runApproveButton', () => {
   });
 
   it('still returns success when embed edit fails (best-effort)', async () => {
+    const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
       { rows: [adRow] },
       { rows: [tierRow] },
+      { rows: [] }, // BEGIN
       { rows: [], rowCount: 1 },
-      { rows: [] },
+      { rows: [{ starts_at: persistedStartsAt }] },
+      { rows: [] }, // INSERT review_logs
+      { rows: [] }, // COMMIT
       { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest({
@@ -370,11 +402,15 @@ describe('runApproveButton', () => {
   });
 
   it('skips embed edit when review_message_id is missing', async () => {
+    const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
       { rows: [{ ...adRow, review_message_id: null }] },
       { rows: [tierRow] },
+      { rows: [] }, // BEGIN
       { rows: [], rowCount: 1 },
-      { rows: [] },
+      { rows: [{ starts_at: persistedStartsAt }] },
+      { rows: [] }, // INSERT review_logs
+      { rows: [] }, // COMMIT
       { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest();

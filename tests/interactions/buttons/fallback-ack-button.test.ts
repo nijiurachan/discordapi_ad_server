@@ -144,14 +144,22 @@ describe('runAckButton', () => {
     expect(rest.deleteChannel).not.toHaveBeenCalled();
   });
 
-  it('happy path: marks ack, sets dm_delivery_status, deletes channel, ephemeral confirmation', async () => {
+  it('happy path: BEGIN/COMMIT bracket the two UPDATEs, deletes channel, ephemeral confirmation', async () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) findFallbackById SELECT — row found
-    //   2) markFallbackAcknowledged UPDATE
-    //   3) setDmDeliveryStatus UPDATE
+    //   2) BEGIN
+    //   3) markFallbackAcknowledged UPDATE
+    //   4) setDmDeliveryStatus UPDATE
+    //   5) COMMIT
     const client = mockClient(
-      [{ rows: [fallbackDbRow] }, { rows: [], rowCount: 1 }, { rows: [], rowCount: 1 }],
+      [
+        { rows: [fallbackDbRow] },
+        { rows: [] },
+        { rows: [], rowCount: 1 },
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+      ],
       captured,
     );
     const rest = mockRest();
@@ -161,6 +169,10 @@ describe('runAckButton', () => {
     expect(json.type).toBe(4);
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('了解を記録');
+
+    // BEGIN/COMMIT bracket the writes.
+    expect(captured[1]?.sql).toMatch(/^BEGIN/);
+    expect(captured[captured.length - 1]?.sql).toMatch(/^COMMIT/);
 
     const ackUpdate = captured.find((c) =>
       /UPDATE dm_fallback_channels SET acknowledged_at = now\(\)/.test(c.sql),
@@ -180,8 +192,10 @@ describe('runAckButton', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const client = mockClient([
       { rows: [fallbackDbRow] },
+      { rows: [] }, // BEGIN
       { rows: [], rowCount: 1 },
       { rows: [], rowCount: 1 },
+      { rows: [] }, // COMMIT
     ]);
     const rest = mockRest({
       deleteChannel: vi.fn(async () => {
@@ -198,8 +212,10 @@ describe('runAckButton', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const client = mockClient([
       { rows: [fallbackDbRow] },
+      { rows: [] }, // BEGIN
       { rows: [], rowCount: 1 },
       { rows: [], rowCount: 1 },
+      { rows: [] }, // COMMIT
     ]);
     const rest = mockRest({
       deleteChannel: vi.fn(async () => {

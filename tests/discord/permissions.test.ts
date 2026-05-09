@@ -11,14 +11,14 @@ describe('PermissionBit constants', () => {
   it('matches Discord permission bit specification', () => {
     expect(PermissionBit.VIEW_CHANNEL).toBe(0x400n);
     expect(PermissionBit.SEND_MESSAGES).toBe(0x800n);
-    expect(PermissionBit.MANAGE_MESSAGES).toBe(0x4000n);
+    expect(PermissionBit.MANAGE_MESSAGES).toBe(0x2000n);
     expect(PermissionBit.READ_MESSAGE_HISTORY).toBe(0x10000n);
   });
 
   it('numeric string constants match expected values', () => {
     expect(PERM_DENY_EVERYONE).toBe('1024');
     expect(PERM_ALLOW_SPONSOR).toBe('66560');
-    expect(PERM_ALLOW_BOT).toBe('84992');
+    expect(PERM_ALLOW_BOT).toBe('76800');
   });
 });
 
@@ -45,7 +45,7 @@ describe('buildFallbackOverwrites', () => {
     expect(overwrites[2]).toEqual({
       id: 'bot-1',
       type: 1,
-      allow: '84992',
+      allow: '76800',
     });
   });
 

@@ -2,7 +2,7 @@ import type { PgClient } from '../../db/client.ts';
 import { insertReviewLog, updateAdStatusOptimistic } from '../../db/queries/review.ts';
 
 export type ApproveResult =
-  | { ok: true; weightSnapshot: number }
+  | { ok: true; weightSnapshot: number; startsAt: Date }
   | { ok: false; reason: 'not_found' | 'no_sponsor' | 'no_tier' | 'race' };
 
 type AdLookup = {
@@ -34,6 +34,8 @@ async function lookupAdAndTierWeight(client: PgClient, adId: string): Promise<Ad
  * Approve a pending ad. Freezes the sponsor's current Tier weight onto the ad row,
  * sets starts_at=now(), and inserts a review_logs entry.
  * Uses optimistic concurrency (status='pending' guard) to prevent double-approve.
+ * UPDATE + log INSERT run in a transaction; the persisted starts_at is read back
+ * from the DB so the caller doesn't drift from the wall clock.
  */
 export async function approveAd(
   client: PgClient,
@@ -45,14 +47,35 @@ export async function approveAd(
   if (!lookup.sponsorId) return { ok: false, reason: 'no_sponsor' };
   if (lookup.weight === null) return { ok: false, reason: 'no_tier' };
 
-  const update = await updateAdStatusOptimistic(client, adId, 'pending', {
-    status: 'approved',
-    reviewedBy: reviewerId,
-    startsAt: 'now',
-    weightSnapshot: lookup.weight,
-  });
-  if (!update.ok) return { ok: false, reason: 'race' };
+  await client.query('BEGIN');
+  try {
+    const update = await updateAdStatusOptimistic(client, adId, 'pending', {
+      status: 'approved',
+      reviewedBy: reviewerId,
+      startsAt: 'now',
+      weightSnapshot: lookup.weight,
+    });
+    if (!update.ok) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'race' };
+    }
 
-  await insertReviewLog(client, adId, reviewerId, 'approved', null);
-  return { ok: true, weightSnapshot: lookup.weight };
+    const startsRes = await client.query<{ starts_at: Date }>(
+      'SELECT starts_at FROM ads WHERE id = $1',
+      [adId],
+    );
+    const startsAt = startsRes.rows[0]?.starts_at ?? new Date();
+
+    await insertReviewLog(client, adId, reviewerId, 'approved', null);
+
+    await client.query('COMMIT');
+    return { ok: true, weightSnapshot: lookup.weight, startsAt };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
 }
