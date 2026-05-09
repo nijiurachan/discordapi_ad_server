@@ -102,14 +102,25 @@ export async function getObject(
       etag: res.ETag,
     };
   } catch (err) {
-    if (
-      err &&
-      typeof err === 'object' &&
-      (('name' in err && (err as { name: string }).name === 'NoSuchKey') ||
-        ('$metadata' in err &&
-          (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404))
-    ) {
-      return null;
+    if (err && typeof err === 'object') {
+      const e = err as {
+        name?: string;
+        Code?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      // NoSuchKey is the canonical "object missing" signal across AWS SDK and
+      // most S3-compatible backends. Treat as null.
+      if (e.name === 'NoSuchKey' || e.Code === 'NoSuchKey') {
+        return null;
+      }
+      // Bare HTTP 404 *without* a specific error name (some S3-compatible
+      // implementations like MinIO) — treat as null only when no named error
+      // code is set, so we don't mask NoSuchBucket / AccessDenied / etc.
+      // The default `new Error()` name is 'Error' (i.e., not a specific S3
+      // error), so we accept that as "unspecified".
+      if (e.$metadata?.httpStatusCode === 404 && (!e.name || e.name === 'Error') && !e.Code) {
+        return null;
+      }
     }
     throw err;
   }

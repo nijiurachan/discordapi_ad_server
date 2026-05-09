@@ -89,4 +89,32 @@ describe('getObject', () => {
     const client = { send } as unknown as Parameters<typeof getObject>[0];
     await expect(getObject(client, 'bucket', 'key')).rejects.toThrow('500');
   });
+
+  it('rethrows NoSuchBucket even when status is 404', async () => {
+    const send = vi.fn(async () => {
+      const e = new Error('bucket missing') as Error & {
+        name: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      e.name = 'NoSuchBucket';
+      e.$metadata = { httpStatusCode: 404 };
+      throw e;
+    });
+    const client = { send } as unknown as Parameters<typeof getObject>[0];
+    await expect(getObject(client, 'bucket', 'key')).rejects.toThrow('bucket missing');
+  });
+
+  it('rethrows AccessDenied even with 404', async () => {
+    const send = vi.fn(async () => {
+      const e = new Error('access denied') as Error & {
+        Code?: string;
+        $metadata?: { httpStatusCode?: number };
+      };
+      e.Code = 'AccessDenied';
+      e.$metadata = { httpStatusCode: 404 };
+      throw e;
+    });
+    const client = { send } as unknown as Parameters<typeof getObject>[0];
+    await expect(getObject(client, 'bucket', 'key')).rejects.toThrow('access denied');
+  });
 });
