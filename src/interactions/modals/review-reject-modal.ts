@@ -6,6 +6,7 @@ import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { sendResultDM } from '../../services/review/dm.ts';
+import { createOrReuseFallbackChannel } from '../../services/review/fallback.ts';
 import { isReviewer } from '../../sponsors/reviewer-auth.ts';
 import { ephemeral } from '../responses.ts';
 
@@ -71,6 +72,10 @@ export type RejectModalDeps = {
   reviewChannelId: string;
   workerBaseUrl: string;
   reviewerRoleId: string;
+  guildId: string;
+  botId: string;
+  fallbackCategoryId: string;
+  uuid: () => string;
 };
 
 /**
@@ -153,8 +158,11 @@ export async function runRejectModal(
     }
   }
 
-  // Send DM (P3.4). The fallback channel post for blocked DMs ships in P3.5.
-  let dmStatus: 'sent' | 'blocked' | 'no_sponsor' | 'rest_error' = 'rest_error';
+  // Send DM (P3.4); fall back to private channel post when blocked (P3.5).
+  // Note: 'blocked' never surfaces as the final status — the blocked branch
+  // always resolves to either 'fallback_posted' (success) or 'rest_error'
+  // (fallback creation/post failed).
+  let dmStatus: 'sent' | 'no_sponsor' | 'rest_error' | 'fallback_posted' = 'rest_error';
   if (ad.sponsorId) {
     const dmResult = await sendResultDM({
       rest: deps.rest,
@@ -169,7 +177,32 @@ export async function runRejectModal(
       action: 'rejected',
       reason,
     });
-    dmStatus = dmResult.ok ? 'sent' : dmResult.reason;
+    if (dmResult.ok) {
+      dmStatus = 'sent';
+    } else if (dmResult.reason === 'blocked') {
+      const fb = await createOrReuseFallbackChannel({
+        rest: deps.rest,
+        client: deps.client,
+        guildId: deps.guildId,
+        botId: deps.botId,
+        categoryId: deps.fallbackCategoryId,
+        ad: {
+          id: ad.id,
+          slot: ad.slot,
+          title: ad.title,
+          reviewedAt: new Date(),
+        },
+        sponsorId: ad.sponsorId,
+        action: 'rejected',
+        reason,
+        uuid: deps.uuid,
+      });
+      dmStatus = fb.ok ? 'fallback_posted' : 'rest_error';
+    } else if (dmResult.reason === 'no_sponsor') {
+      dmStatus = 'no_sponsor';
+    } else {
+      dmStatus = 'rest_error';
+    }
   } else {
     dmStatus = 'no_sponsor';
   }
@@ -177,8 +210,8 @@ export async function runRejectModal(
   const dmNote =
     dmStatus === 'sent'
       ? 'DM で起稿者に通知しました。'
-      : dmStatus === 'blocked'
-        ? '起稿者の DM がオフのため、フォールバックチャンネル投稿は P3.5 で対応します。'
+      : dmStatus === 'fallback_posted'
+        ? 'DM がオフのためプライベートチャンネルで通知しました。'
         : dmStatus === 'no_sponsor'
           ? '（house/placeholder のため DM 送信なし）'
           : '⚠ DM 送信時にエラーが発生しました（ログ参照）。';
@@ -203,6 +236,10 @@ export async function handleRejectModal(
       reviewChannelId: env.REVIEW_CHANNEL_ID,
       workerBaseUrl: env.WORKER_BASE_URL,
       reviewerRoleId: env.REVIEWER_ROLE_ID,
+      guildId: env.GUILD_ID,
+      botId: env.DISCORD_APP_BOT_ID,
+      fallbackCategoryId: env.FALLBACK_CHANNEL_CATEGORY_ID,
+      uuid: () => crypto.randomUUID(),
     }),
   );
 }

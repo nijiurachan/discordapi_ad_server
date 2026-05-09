@@ -34,9 +34,13 @@ function mockRest(overrides?: Partial<DiscordRest>): DiscordRest {
     editMessage: vi.fn(async () => ({ id: 'msg-1', channel_id: 'review-chan' })),
     createDmChannel: vi.fn(async () => ({ id: 'dm-chan-1', type: 1 })),
     createMessage: vi.fn(async () => ({ id: 'dm-msg-1', channel_id: 'dm-chan-1' })),
+    createGuildChannel: vi.fn(async () => ({ id: 'fallback-chan-1', type: 0 })),
+    deleteChannel: vi.fn(async () => ({ id: 'fallback-chan-1', type: 0 })),
     ...overrides,
   } as unknown as DiscordRest;
 }
+
+const FALLBACK_UUID = 'fb-uuid-1';
 
 const REVIEWER_ROLE_ID = 'role-reviewer';
 const AD_ID = '11111111-1111-1111-1111-111111111111';
@@ -96,6 +100,10 @@ function defaultDeps(client: PgClient, rest = mockRest()): ApproveButtonDeps {
     reviewChannelId: 'review-chan',
     workerBaseUrl: 'https://worker.example',
     reviewerRoleId: REVIEWER_ROLE_ID,
+    guildId: 'guild-1',
+    botId: 'bot-1',
+    fallbackCategoryId: 'cat-fallback',
+    uuid: () => FALLBACK_UUID,
   };
 }
 
@@ -179,15 +187,27 @@ describe('runApproveButton', () => {
     expect(dmUpdate?.params?.[2]).toBe(AD_ID);
   });
 
-  it('blocked DM (403 from createDmChannel): ephemeral notes fallback pending, status=failed', async () => {
+  it('blocked DM (403 from createDmChannel): triggers fallback, ephemeral notes private channel post', async () => {
     const captured: CapturedCall[] = [];
+    // Query order:
+    //   1) SELECT ad snapshot
+    //   2) SELECT tier
+    //   3) UPDATE ads (approve)
+    //   4) INSERT review_logs
+    //   5) UPDATE ads SET dm_delivery_status='failed' (DM blocked)
+    //   6) SELECT findActiveFallback — empty
+    //   7) INSERT dm_fallback_channels
+    //   8) UPDATE ads SET dm_delivery_status='fallback_posted'
     const client = mockClient(
       [
         { rows: [adRow] },
         { rows: [tierRow] },
         { rows: [], rowCount: 1 },
         { rows: [] },
-        { rows: [], rowCount: 1 }, // dm UPDATE
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+        { rows: [], rowCount: 1 },
+        { rows: [], rowCount: 1 },
       ],
       captured,
     );
@@ -200,10 +220,61 @@ describe('runApproveButton', () => {
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('承認を確定');
-    expect(json.data.content).toContain('P3.5');
-    expect(rest.createMessage).not.toHaveBeenCalled();
-    const dmUpdate = captured.find((c) => /dm_delivery_status/.test(c.sql));
-    expect(dmUpdate?.params?.[0]).toBe('failed');
+    expect(json.data.content).toContain('プライベートチャンネルで通知');
+
+    // DM was attempted but createMessage on the DM channel never happened — instead
+    // createGuildChannel + createMessage on the new private channel did.
+    expect(rest.createGuildChannel).toHaveBeenCalledTimes(1);
+    expect(rest.createMessage).toHaveBeenCalledTimes(1);
+
+    // Check the dm status transitions: first 'failed' (DM 403), then 'fallback_posted'.
+    const dmUpdates = captured.filter((c) => /dm_delivery_status/.test(c.sql));
+    expect(dmUpdates).toHaveLength(2);
+    expect(dmUpdates[0]?.params?.[0]).toBe('failed');
+    expect(dmUpdates[1]?.params?.[0]).toBe('fallback_posted');
+
+    // Fallback row INSERTed.
+    const fbInsert = captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql));
+    expect(fbInsert).toBeDefined();
+    expect(fbInsert?.params?.[0]).toBe(FALLBACK_UUID);
+    expect(fbInsert?.params?.[1]).toBe(AD_ID);
+    expect(fbInsert?.params?.[2]).toBe('sponsor-1');
+  });
+
+  it('blocked DM + createGuildChannel fails: ephemeral notes failure', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const captured: CapturedCall[] = [];
+    // Query order: snapshot, tier, UPDATE, INSERT log, dm UPDATE (failed), SELECT findActiveFallback (empty)
+    const client = mockClient(
+      [
+        { rows: [adRow] },
+        { rows: [tierRow] },
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+        { rows: [], rowCount: 1 },
+        { rows: [] },
+      ],
+      captured,
+    );
+    const rest = mockRest({
+      createDmChannel: vi.fn(async () => {
+        throw new DiscordRestError(403, 'blocked');
+      }),
+      createGuildChannel: vi.fn(async () => {
+        throw new DiscordRestError(500, 'cannot create channel');
+      }),
+    });
+    const res = await invoke(buildPayload(), defaultDeps(client, rest));
+    const json = (await res.json()) as { type: number; data: { content: string } };
+    expect(json.type).toBe(4);
+    expect(json.data.content).toContain('承認を確定');
+    // Failure path uses the 'rest_error' branch wording.
+    expect(json.data.content).toContain('DM 送信時にエラー');
+    // No fallback INSERT, only the original dm 'failed' UPDATE.
+    expect(captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql))).toBeUndefined();
+    const dmUpdates = captured.filter((c) => /dm_delivery_status/.test(c.sql));
+    expect(dmUpdates).toHaveLength(1);
+    expect(dmUpdates[0]?.params?.[0]).toBe('failed');
   });
 
   it('returns ephemeral permission error when member lacks reviewer role', async () => {
