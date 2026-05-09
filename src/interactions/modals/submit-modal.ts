@@ -1,6 +1,7 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
 import { type PgClient, withPgClient } from '../../db/client.ts';
+import { setAdReviewMessageId } from '../../db/queries/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import { postReviewEmbed } from '../../discord/review-embed.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
@@ -243,15 +244,22 @@ export async function runSubmitModal(
 
   // 9. post review embed (non-fatal: admin can re-trigger if it fails)
   try {
-    await postReviewEmbed({
+    const result = await postReviewEmbed({
       rest: deps.rest,
       channelId: deps.reviewChannelId,
       workerBaseUrl: deps.workerBaseUrl,
       ad: { id: adId, slot: draft.slot, title, body, linkUrl, imageExt: ext },
       sponsor: { id: draft.sponsorId },
     });
+    // Persist message_id so P3.2 / P3.3 can edit the same review message.
+    try {
+      await setAdReviewMessageId(deps.client, adId, result.messageId);
+    } catch (persistErr) {
+      console.error('submit-modal: setAdReviewMessageId failed', persistErr);
+    }
   } catch (err) {
     console.error('submit-modal: review embed post failed', err);
+    // continue; admin can re-trigger
   }
 
   // 10. ephemeral confirmation (DM notifications arrive in P3; for now we just

@@ -135,7 +135,7 @@ function defaultDeps(client: PgClient, rest = mockRest()): ModalSubmitDeps {
 // --- tests ----------------------------------------------------------------
 
 describe('runSubmitModal', () => {
-  it('happy path: returns ephemeral confirmation and inserts ads row', async () => {
+  it('happy path: returns ephemeral confirmation, inserts ads row, and persists review_message_id', async () => {
     const captured: CapturedCall[] = [];
     // Tx-aware query order:
     //   1) fetchDraft
@@ -147,6 +147,7 @@ describe('runSubmitModal', () => {
     //   7) INSERT ads
     //   8) DELETE ad_drafts
     //   9) COMMIT
+    //  10) UPDATE ads SET review_message_id (after best-effort embed post)
     const client = mockClient(
       [
         { rows: [draftRow] },
@@ -158,6 +159,7 @@ describe('runSubmitModal', () => {
         { rows: [] }, // INSERT
         { rows: [] }, // DELETE
         { rows: [] }, // COMMIT
+        { rows: [] }, // UPDATE review_message_id
       ],
       captured,
     );
@@ -190,8 +192,16 @@ describe('runSubmitModal', () => {
 
     expect(rest.createMessage).toHaveBeenCalledWith(
       'review-chan',
-      expect.objectContaining({ embeds: expect.any(Array) }),
+      expect.objectContaining({
+        embeds: expect.any(Array),
+        components: expect.any(Array),
+      }),
     );
+
+    // review_message_id was persisted from the createMessage response (msg-1).
+    const updateMsgId = captured.find((c) => /UPDATE ads SET review_message_id/.test(c.sql));
+    expect(updateMsgId).toBeDefined();
+    expect(updateMsgId?.params).toEqual(['msg-1', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']);
   });
 
   it('rejects malformed custom_id (no submit: prefix)', async () => {
@@ -311,17 +321,21 @@ describe('runSubmitModal', () => {
   });
 
   it('still returns success even when review embed posting fails', async () => {
-    const client = mockClient([
-      { rows: [draftRow] },
-      { rows: [formatRulesRow] },
-      { rows: [] }, // BEGIN
-      { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
-      { rows: [{ max_active_ads: 5 }] },
-      { rows: [{ count: '0' }] },
-      { rows: [] }, // INSERT
-      { rows: [] }, // DELETE
-      { rows: [] }, // COMMIT
-    ]);
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [draftRow] },
+        { rows: [formatRulesRow] },
+        { rows: [] }, // BEGIN
+        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
+        { rows: [{ max_active_ads: 5 }] },
+        { rows: [{ count: '0' }] },
+        { rows: [] }, // INSERT
+        { rows: [] }, // DELETE
+        { rows: [] }, // COMMIT
+      ],
+      captured,
+    );
     const rest = {
       createMessage: vi.fn(async () => {
         throw new Error('discord 500');
@@ -331,6 +345,8 @@ describe('runSubmitModal', () => {
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('受付完了');
+    // When the embed post fails, review_message_id must NOT be updated.
+    expect(captured.every((c) => !/UPDATE ads SET review_message_id/.test(c.sql))).toBe(true);
   });
 
   it('still returns success even when staging delete fails', async () => {
@@ -344,6 +360,7 @@ describe('runSubmitModal', () => {
       { rows: [] }, // INSERT
       { rows: [] }, // DELETE
       { rows: [] }, // COMMIT
+      { rows: [] }, // UPDATE review_message_id
     ]);
     let sendCount = 0;
     const s3 = {

@@ -117,6 +117,12 @@ interactions.post('/', async (c) => {
       if (cid.startsWith('ad:withdraw:')) {
         return handleAdWithdrawButton(c, mc);
       }
+      if (cid.startsWith('review:approve:')) {
+        return c.json({ error: 'review approve handler ships in P3.3' }, 501);
+      }
+      if (cid.startsWith('review:reject:')) {
+        return c.json({ error: 'review reject handler ships in P3.2' }, 501);
+      }
       return c.json({ error: 'unknown component' }, 501);
     }
 

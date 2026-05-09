@@ -1,3 +1,4 @@
+import { buildReviewButtons, buildReviewEmbed } from './embeds/review.ts';
 import type { DiscordRest } from './rest.ts';
 
 export type ReviewAd = {
@@ -22,24 +23,27 @@ export type PostReviewEmbedArgs = {
 };
 
 /**
- * Post a review embed to the review channel. Approve / Reject buttons are
- * intentionally out of scope for P2 — they will be added in P3.
+ * Post a review embed (with Approve / Reject buttons) to the review channel.
+ * Returns the created message id so the caller can persist it for later edits
+ * (P3.2 / P3.3 update the same message when reviewers act).
  */
-export async function postReviewEmbed(args: PostReviewEmbedArgs): Promise<void> {
+export async function postReviewEmbed(args: PostReviewEmbedArgs): Promise<{ messageId: string }> {
   const imageUrl = `${args.workerBaseUrl}/images/ads/${args.ad.id}/orig.${args.ad.imageExt}`;
-  const embed = {
-    title: '📥 新しい広告審査依頼',
-    url: args.ad.linkUrl,
-    description: `**${args.ad.title}**`,
-    fields: [
-      { name: '本文', value: args.ad.body.slice(0, 1024), inline: false },
-      { name: 'リンク URL', value: args.ad.linkUrl.slice(0, 1024), inline: false },
-      { name: 'スロット', value: args.ad.slot, inline: true },
-      { name: 'スポンサー', value: `<@${args.sponsor.id}>`, inline: true },
-      { name: '広告 ID', value: `\`${args.ad.id}\``, inline: false },
-    ],
-    image: { url: imageUrl },
-    timestamp: new Date().toISOString(),
-  };
-  await args.rest.createMessage(args.channelId, { embeds: [embed] });
+  const embed = buildReviewEmbed(
+    {
+      id: args.ad.id,
+      slot: args.ad.slot,
+      title: args.ad.title,
+      body: args.ad.body,
+      linkUrl: args.ad.linkUrl,
+      imageUrl,
+    },
+    { id: args.sponsor.id },
+  );
+  const buttons = buildReviewButtons(args.ad.id);
+  const message = await args.rest.createMessage(args.channelId, {
+    embeds: [embed],
+    components: [buttons],
+  });
+  return { messageId: message.id };
 }

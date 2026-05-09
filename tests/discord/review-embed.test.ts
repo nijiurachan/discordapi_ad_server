@@ -2,17 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DiscordRest } from '../../src/discord/rest.ts';
 import { postReviewEmbed } from '../../src/discord/review-embed.ts';
 
-type CreateMessageCall = [channelId: string, body: { embeds: Array<Record<string, unknown>> }];
+type CreateMessageCall = [
+  channelId: string,
+  body: {
+    embeds: Array<Record<string, unknown>>;
+    components: Array<{ type: number; components: Array<{ custom_id?: string; style: number }> }>;
+  },
+];
 
 describe('postReviewEmbed', () => {
-  it('posts an embed with the correct image URL and field shape', async () => {
+  it('posts an embed with the correct image URL and field shape, plus action-row buttons, and returns the message id', async () => {
     const createMessage = vi.fn(async (_channelId: string, _body: Record<string, unknown>) => ({
       id: 'msg-1',
       channel_id: 'review-chan',
     }));
     const rest = { createMessage } as unknown as DiscordRest;
 
-    await postReviewEmbed({
+    const result = await postReviewEmbed({
       rest,
       channelId: 'review-chan',
       workerBaseUrl: 'https://worker.example',
@@ -27,6 +33,7 @@ describe('postReviewEmbed', () => {
       sponsor: { id: 'user-123' },
     });
 
+    expect(result).toEqual({ messageId: 'msg-1' });
     expect(createMessage).toHaveBeenCalledTimes(1);
     const call = createMessage.mock.calls[0] as unknown as CreateMessageCall;
     expect(call[0]).toBe('review-chan');
@@ -43,6 +50,20 @@ describe('postReviewEmbed', () => {
     expect(sponsorField?.value).toBe('<@user-123>');
     const idField = embed.fields.find((f) => f.name === '広告 ID');
     expect(idField?.value).toContain('ad-uuid');
+
+    // Action-row with two interactive buttons.
+    expect(call[1].components).toHaveLength(1);
+    const row = call[1].components[0];
+    if (!row) throw new Error('expected one action row');
+    expect(row.type).toBe(1);
+    expect(row.components).toHaveLength(2);
+    const approve = row.components[0];
+    const reject = row.components[1];
+    if (!approve || !reject) throw new Error('expected two buttons');
+    expect(approve.custom_id).toBe('review:approve:ad-uuid');
+    expect(approve.style).toBe(3); // SUCCESS
+    expect(reject.custom_id).toBe('review:reject:ad-uuid');
+    expect(reject.style).toBe(4); // DANGER
   });
 
   it('truncates linkUrl field to 1024 chars but keeps full URL on embed.url', async () => {
