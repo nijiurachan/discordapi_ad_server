@@ -53,6 +53,12 @@ export function createDiscordRest(o: DiscordRestOptions) {
       request<Message>(opts, 'PATCH', `/channels/${channelId}/messages/${messageId}`, body),
     createGuildChannel: (guildId: string, body: Json) =>
       request<Channel>(opts, 'POST', `/guilds/${guildId}/channels`, body),
+    getGuildMember: (guildId: string, userId: string) =>
+      request<{ user: { id: string; username?: string }; roles?: string[] }>(
+        opts,
+        'GET',
+        `/guilds/${guildId}/members/${userId}`,
+      ),
   };
 }
 

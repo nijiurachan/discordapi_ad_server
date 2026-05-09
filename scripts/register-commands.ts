@@ -19,6 +19,33 @@ const commands = [
     description: 'liveness check (P1 placeholder)',
     type: 1,
   },
+  {
+    name: 'ad',
+    description: 'Ad management commands',
+    type: 1,
+    options: [
+      {
+        name: 'submit',
+        description: 'Submit a new ad for review',
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: 'slot',
+            description: 'Slot the ad will be displayed in',
+            type: 3, // STRING
+            required: true,
+            choices: [{ name: 'default', value: 'default' }],
+          },
+          {
+            name: 'image',
+            description: 'Banner image (PNG/JPEG/GIF/WebP)',
+            type: 11, // ATTACHMENT
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 const url = `https://discord.com/api/v10/applications/${DISCORD_APP_ID}/guilds/${GUILD_ID}/commands`;
