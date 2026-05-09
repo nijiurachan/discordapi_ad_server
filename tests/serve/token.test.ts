@@ -36,6 +36,22 @@ describe('impression token', () => {
     expect(res).toEqual({ valid: false, reason: 'expired' });
   });
 
+  it('valid at exactly TTL boundary (5 min)', async () => {
+    const servedAt = new Date('2026-05-09T12:00:00.000Z');
+    const token = await generateImpressionToken(scope, servedAt, SECRET);
+    const now = new Date('2026-05-09T12:05:00.000Z'); // exactly +5 min
+    const res = await verifyImpressionToken(token, scope, SECRET, now);
+    expect(res).toEqual({ valid: true });
+  });
+
+  it('expired 1ms past TTL boundary', async () => {
+    const servedAt = new Date('2026-05-09T12:00:00.000Z');
+    const token = await generateImpressionToken(scope, servedAt, SECRET);
+    const now = new Date('2026-05-09T12:05:00.001Z'); // 1ms past
+    const res = await verifyImpressionToken(token, scope, SECRET, now);
+    expect(res).toEqual({ valid: false, reason: 'expired' });
+  });
+
   it('rejects token from a different scope', async () => {
     const servedAt = new Date('2026-05-09T12:00:00.000Z');
     const token = await generateImpressionToken(scope, servedAt, SECRET);

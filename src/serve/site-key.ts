@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import type { Bindings } from '../env.ts';
+import { timingSafeEqualStrings } from '../utils/timing-safe.ts';
 
 /**
  * Optional site-key validation for /ads/serve.
@@ -10,7 +11,7 @@ export const requireSiteKey = createMiddleware<{ Bindings: Bindings }>(async (c,
   const expected = c.env.SITE_API_KEY;
   if (!expected) return next();
   const provided = c.req.header('X-Site-Key');
-  if (!provided || provided !== expected) {
+  if (!timingSafeEqualStrings(provided, expected)) {
     return c.json({ error: 'invalid site key' }, 401);
   }
   return next();

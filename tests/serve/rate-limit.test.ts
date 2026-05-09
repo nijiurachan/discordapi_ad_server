@@ -31,6 +31,8 @@ describe('serveRateLimit', () => {
     const fetch = buildApp({ SERVE_RATE_LIMITER: { limit } }, 'serve');
     const res = await fetch(new Request('http://x/serve'));
     expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'rate limit exceeded' });
   });
 
   it('uses "unknown" when cf-connecting-ip header absent', async () => {
@@ -58,5 +60,7 @@ describe('clickRateLimit', () => {
     const fetch = buildApp({ CLICK_RATE_LIMITER: { limit } }, 'click');
     const res = await fetch(new Request('http://x/click/abc-123'));
     expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'rate limit exceeded' });
   });
 });

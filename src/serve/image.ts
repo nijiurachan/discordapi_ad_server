@@ -29,8 +29,12 @@ export async function handleImage(c: Context<{ Bindings: Bindings }>): Promise<R
     return c.text('invalid ad id', 400);
   }
 
-  // Cache lookup (Workers caches.default).
-  const cacheKey = new Request(c.req.url, c.req.raw);
+  // Cache lookup (Workers caches.default). Normalize the key by stripping
+  // the query string — the image is identified solely by adId, so different
+  // ?x=1 vs ?x=2 must hit the same cache entry.
+  const cacheUrl = new URL(c.req.url);
+  cacheUrl.search = '';
+  const cacheKey = new Request(cacheUrl.toString(), { method: 'GET' });
   const cache = caches.default;
   const cached = await cache.match(cacheKey);
   if (cached) return cached;

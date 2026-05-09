@@ -1,3 +1,5 @@
+import { timingSafeEqualBytes } from '../utils/timing-safe.ts';
+
 const TOKEN_PREFIX = 'v1.';
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -44,25 +46,17 @@ function base64UrlToBytes(s: string): Uint8Array | null {
   }
 }
 
-function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.byteLength !== b.byteLength) return false;
-  let diff = 0;
-  for (let i = 0; i < a.byteLength; i++) {
-    diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
-  }
-  return diff === 0;
-}
-
 export async function generateImpressionToken(
   scope: ImpressionTokenScope,
   servedAt: Date,
   secret: string,
 ): Promise<string> {
   const sig = await hmacSha256(secret, buildMessage(scope, servedAt));
-  // Pack: <iso-timestamp>.<base64url-hmac>
+  // Pack: <base64url-iso-timestamp>.<base64url-hmac>
   // Including the timestamp lets the verifier check TTL without external state.
   const ts = servedAt.toISOString();
-  return `${TOKEN_PREFIX}${btoa(ts).replace(/=+$/, '')}.${bytesToBase64Url(sig)}`;
+  const tsBytes = new TextEncoder().encode(ts);
+  return `${TOKEN_PREFIX}${bytesToBase64Url(tsBytes)}.${bytesToBase64Url(sig)}`;
 }
 
 export type VerifyResult =
@@ -83,10 +77,11 @@ export async function verifyImpressionToken(
   const tsB64 = rest.slice(0, dot);
   const sigB64 = rest.slice(dot + 1);
 
+  const tsBytes = base64UrlToBytes(tsB64);
+  if (!tsBytes) return { valid: false, reason: 'malformed' };
   let servedAt: Date;
   try {
-    const padded = tsB64 + '='.repeat((4 - (tsB64.length % 4)) % 4);
-    const tsStr = atob(padded);
+    const tsStr = new TextDecoder().decode(tsBytes);
     servedAt = new Date(tsStr);
     if (Number.isNaN(servedAt.getTime())) return { valid: false, reason: 'malformed' };
   } catch {
@@ -105,7 +100,7 @@ export async function verifyImpressionToken(
   }
 
   const expected = await hmacSha256(secret, buildMessage(scope, servedAt));
-  if (!timingSafeEqual(expected, sigBytes)) {
+  if (!timingSafeEqualBytes(expected, sigBytes)) {
     return { valid: false, reason: 'mismatch' };
   }
   return { valid: true };

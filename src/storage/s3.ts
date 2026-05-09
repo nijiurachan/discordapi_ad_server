@@ -105,8 +105,9 @@ export async function getObject(
     if (
       err &&
       typeof err === 'object' &&
-      'name' in err &&
-      (err as { name: string }).name === 'NoSuchKey'
+      (('name' in err && (err as { name: string }).name === 'NoSuchKey') ||
+        ('$metadata' in err &&
+          (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404))
     ) {
       return null;
     }

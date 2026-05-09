@@ -29,8 +29,13 @@
 - `vitest.config.ts` — テスト用 binding 追加（適当な固定 hex 値）
 - `wrangler.toml` — `vars` ではなく Worker secret として運用（README に記載）。.env.example に追記
 - `src/serve/token.ts` (新):
-  - `generateImpressionToken(adId, slot, servedAt: Date, ipHash, secret): string` — `v1.<base64url-hmac>` を返す
-  - `verifyImpressionToken(token, expected: { adId, slot, ipHash }, secret, now?: Date): { valid: true } | { valid: false, reason: 'malformed' | 'expired' | 'mismatch' }`
+  - `generateImpressionToken(adId, slot, servedAt: Date, ipHash, secret): string` —
+    `v1.<base64url-iso>.<base64url-hmac>` を返す（ISO timestamp を base64url で
+    エンコードしてバージョンと HMAC の間に挟む）
+  - `verifyImpressionToken(token, expected: { adId, slot, ipHash }, secret, now?: Date):
+    { valid: true } | { valid: false, reason: 'malformed' | 'expired' | 'mismatch' }`
+    — 中央のタイムスタンプセグメントをパースし、`now` に対する 5 分 TTL を検査して
+    `malformed` / `expired` / `mismatch` を区別して返す
   - HMAC メッセージ: `${adId}|${slot}|${servedAt.toISOString()}|${ipHash}`
   - timingSafeEqual で検証
   - TTL 5 分（300 秒）

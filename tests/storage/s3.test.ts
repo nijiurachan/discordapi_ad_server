@@ -71,6 +71,17 @@ describe('getObject', () => {
     expect(res).toBeNull();
   });
 
+  it('returns null on 404 via $metadata.httpStatusCode', async () => {
+    const send = vi.fn(async () => {
+      const e = new Error('not found') as Error & { $metadata?: { httpStatusCode?: number } };
+      e.$metadata = { httpStatusCode: 404 };
+      throw e;
+    });
+    const client = { send } as unknown as Parameters<typeof getObject>[0];
+    const res = await getObject(client, 'bucket', 'key');
+    expect(res).toBeNull();
+  });
+
   it('rethrows non-NoSuchKey errors', async () => {
     const send = vi.fn(async () => {
       throw new Error('500');

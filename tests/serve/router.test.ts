@@ -35,10 +35,11 @@ describe('parseN', () => {
 });
 
 describe('GET /ads/serve route mounting', () => {
-  it('returns either 200 / 204 / 500 (route is mounted; DB unreachable in test env is acceptable)', async () => {
+  it('returns 200/204/401/429/500 (route is mounted; DB unreachable in test env is acceptable)', async () => {
     const res = await SELF.fetch('http://example.com/ads/serve?slot=default&n=1');
-    // 200=happy, 204=empty, 500=DB unreachable in test env. 404 would mean unmounted.
-    expect([200, 204, 500]).toContain(res.status);
+    // 200=happy, 204=empty, 401=site key, 429=rate limited, 500=DB unreachable in
+    // test env. 404 would mean unmounted.
+    expect([200, 204, 401, 429, 500]).toContain(res.status);
   });
 
   it('rejects POST with 404 (only GET is mounted)', async () => {

@@ -1,5 +1,18 @@
-import { SELF } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
+
+// Mock withPgClient to deterministically return null (ad not found) for the
+// route-level integration test. This avoids non-deterministic 500s caused by
+// the worker test env being unable to reach Postgres.
+vi.mock('../../src/db/client.ts', () => ({
+  withPgClient: vi.fn(async (_url: string, fn: (client: unknown) => Promise<unknown>) => {
+    return fn({
+      query: vi.fn(async () => ({ rows: [], rowCount: 0 })),
+      end: vi.fn(),
+    });
+  }),
+}));
+
+import { SELF } from 'cloudflare:test';
 import type { PgClient } from '../../src/db/client.ts';
 import { getAdImage, isValidAdId } from '../../src/serve/image.ts';
 
@@ -68,12 +81,11 @@ describe('GET /ads/image/:adId route mounting', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 404 (no ad) or 500 (DB unreachable) for valid UUID — route exists', async () => {
+  it('returns 404 for valid UUID when ad not in DB', async () => {
     const res = await SELF.fetch(
-      'http://example.com/ads/image/11111111-2222-3333-4444-555555555555',
+      'http://example.com/ads/image/00000000-0000-0000-0000-000000000001',
     );
-    // 404 = ad not found in DB; 500 = DB unreachable in test env. Both prove route is mounted.
-    expect([404, 500]).toContain(res.status);
+    expect(res.status).toBe(404);
   });
 
   it('rejects POST with 404 (only GET is mounted)', async () => {

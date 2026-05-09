@@ -64,7 +64,9 @@ describe('/ads/click/:adId route', () => {
       { redirect: 'manual' },
     );
     // Route is reached; the actual redirect would use the persisted link_url, not the query.
-    // In test env (DB unreachable), we get 500. Just assert the request didn't 302 to attacker.
+    // In test env (DB unreachable), we get 500. Assert the request didn't 302 to attacker
+    // and that the route was actually reached (not 404).
+    expect(res.status).not.toBe(404);
     if (res.status === 302) {
       const loc = res.headers.get('location') ?? '';
       expect(loc).not.toContain('attacker.example');
