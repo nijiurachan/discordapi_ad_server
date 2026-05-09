@@ -42,13 +42,25 @@ export async function approveAd(
   adId: string,
   reviewerId: string,
 ): Promise<ApproveResult> {
-  const lookup = await lookupAdAndTierWeight(client, adId);
-  if (!lookup) return { ok: false, reason: 'not_found' };
-  if (!lookup.sponsorId) return { ok: false, reason: 'no_sponsor' };
-  if (lookup.weight === null) return { ok: false, reason: 'no_tier' };
-
-  await client.query('BEGIN');
+  // Use REPEATABLE READ so the lookup we read here stays consistent through the UPDATE.
+  // (Default READ COMMITTED could otherwise let another transaction's committed change
+  // make the just-read tier weight stale before our UPDATE runs.)
+  await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
   try {
+    const lookup = await lookupAdAndTierWeight(client, adId);
+    if (!lookup) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'not_found' };
+    }
+    if (!lookup.sponsorId) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'no_sponsor' };
+    }
+    if (lookup.weight === null) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'no_tier' };
+    }
+
     const update = await updateAdStatusOptimistic(client, adId, 'pending', {
       status: 'approved',
       reviewedBy: reviewerId,

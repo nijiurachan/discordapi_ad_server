@@ -22,7 +22,11 @@ function mockClient(
     query: vi.fn(async (sql: string, params?: unknown[]) => {
       captured.push({ sql, params });
       const r = responses[i++];
-      if (!r) return { rows: [], rowCount: 0 };
+      if (!r) {
+        throw new Error(
+          `mockClient responses exhausted (call #${i}, sql: ${String(sql).slice(0, 80)}...)`,
+        );
+      }
       return { rowCount: r.rowCount ?? r.rows.length, ...r };
     }) as unknown as PgClient['query'],
     end: vi.fn(async () => undefined),

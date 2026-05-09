@@ -26,42 +26,66 @@ const REVIEWER_ID = 'reviewer-1';
 describe('approveAd', () => {
   it('returns not_found when SELECT returns no row', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient([{ rows: [] }], captured);
+    const client = mockClient(
+      [
+        { rows: [] }, // BEGIN
+        { rows: [] }, // lookup — no row
+        { rows: [] }, // ROLLBACK
+      ],
+      captured,
+    );
     const result = await approveAd(client, AD_ID, REVIEWER_ID);
     expect(result).toEqual({ ok: false, reason: 'not_found' });
-    // Only the lookup query ran — no transaction, no UPDATE / INSERT.
-    expect(captured).toHaveLength(1);
-    expect(captured[0]?.sql).toMatch(/FROM ads a/);
+    // BEGIN + lookup + ROLLBACK; no UPDATE / INSERT / COMMIT.
+    expect(captured).toHaveLength(3);
+    expect(captured[0]?.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ/);
+    expect(captured[1]?.sql).toMatch(/FROM ads a/);
+    expect(captured[2]?.sql).toMatch(/^ROLLBACK/);
+    expect(captured.every((c) => !/UPDATE ads SET/.test(c.sql))).toBe(true);
+    expect(captured.every((c) => !/INSERT INTO review_logs/.test(c.sql))).toBe(true);
+    expect(captured.every((c) => !/^COMMIT/.test(c.sql))).toBe(true);
   });
 
   it('returns no_sponsor when sponsor_id is null', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
-      [{ rows: [{ sponsor_id: null, status: 'pending', weight: 5 }] }],
+      [
+        { rows: [] }, // BEGIN
+        { rows: [{ sponsor_id: null, status: 'pending', weight: 5 }] }, // lookup
+        { rows: [] }, // ROLLBACK
+      ],
       captured,
     );
     const result = await approveAd(client, AD_ID, REVIEWER_ID);
     expect(result).toEqual({ ok: false, reason: 'no_sponsor' });
-    expect(captured).toHaveLength(1);
+    expect(captured).toHaveLength(3);
+    expect(captured[0]?.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ/);
+    expect(captured[2]?.sql).toMatch(/^ROLLBACK/);
   });
 
   it('returns no_tier when sponsor has no current_tier_id (weight is null)', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
-      [{ rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: null }] }],
+      [
+        { rows: [] }, // BEGIN
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: null }] }, // lookup
+        { rows: [] }, // ROLLBACK
+      ],
       captured,
     );
     const result = await approveAd(client, AD_ID, REVIEWER_ID);
     expect(result).toEqual({ ok: false, reason: 'no_tier' });
-    expect(captured).toHaveLength(1);
+    expect(captured).toHaveLength(3);
+    expect(captured[0]?.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ/);
+    expect(captured[2]?.sql).toMatch(/^ROLLBACK/);
   });
 
   it('returns race when optimistic UPDATE finds no pending row (BEGIN → ROLLBACK, no INSERT)', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [
-        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7 }] },
         { rows: [] }, // BEGIN
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7 }] }, // lookup
         { rows: [], rowCount: 0 }, // UPDATE — already moved by another reviewer
         { rows: [] }, // ROLLBACK
       ],
@@ -69,9 +93,10 @@ describe('approveAd', () => {
     );
     const result = await approveAd(client, AD_ID, REVIEWER_ID);
     expect(result).toEqual({ ok: false, reason: 'race' });
-    // Lookup + BEGIN + UPDATE + ROLLBACK; no INSERT, no COMMIT.
+    // BEGIN + lookup + UPDATE + ROLLBACK; no INSERT, no COMMIT.
     expect(captured).toHaveLength(4);
-    expect(captured[1]?.sql).toMatch(/^BEGIN/);
+    expect(captured[0]?.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ/);
+    expect(captured[1]?.sql).toMatch(/FROM ads a/);
     expect(captured[2]?.sql).toMatch(/UPDATE ads SET/);
     expect(captured[3]?.sql).toMatch(/^ROLLBACK/);
     expect(captured.every((c) => !/INSERT INTO review_logs/.test(c.sql))).toBe(true);
@@ -83,8 +108,8 @@ describe('approveAd', () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
-        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7 }] },
         { rows: [] }, // BEGIN
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7 }] }, // lookup
         { rows: [], rowCount: 1 }, // UPDATE
         { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
         { rows: [] }, // INSERT review_logs
@@ -95,13 +120,13 @@ describe('approveAd', () => {
     const result = await approveAd(client, AD_ID, REVIEWER_ID);
     expect(result).toEqual({ ok: true, weightSnapshot: 7, startsAt: persistedStartsAt });
 
-    // Lookup query ran with adId.
-    expect(captured[0]?.sql).toMatch(/FROM ads a/);
-    expect(captured[0]?.params).toEqual([AD_ID]);
-
-    // BEGIN/COMMIT bracket the writes.
-    expect(captured[1]?.sql).toMatch(/^BEGIN/);
+    // BEGIN with REPEATABLE READ wraps the lookup + writes.
+    expect(captured[0]?.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ/);
     expect(captured[captured.length - 1]?.sql).toMatch(/^COMMIT/);
+
+    // Lookup query ran with adId, inside the tx.
+    expect(captured[1]?.sql).toMatch(/FROM ads a/);
+    expect(captured[1]?.params).toEqual([AD_ID]);
 
     // UPDATE was called: pending guard, target=approved, weight_snapshot=7, reviewer captured.
     const update = captured.find((c) => /UPDATE ads SET/.test(c.sql));
@@ -134,8 +159,8 @@ describe('approveAd', () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [
-        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7 }] },
         { rows: [] }, // BEGIN
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7 }] }, // lookup
         { rows: [], rowCount: 1 }, // UPDATE
         { rows: [] }, // SELECT starts_at (empty — defensive)
         { rows: [] }, // INSERT review_logs
@@ -157,8 +182,8 @@ describe('approveAd', () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
-        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 0 }] },
         { rows: [] }, // BEGIN
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 0 }] }, // lookup
         { rows: [], rowCount: 1 }, // UPDATE
         { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
         { rows: [] }, // INSERT review_logs

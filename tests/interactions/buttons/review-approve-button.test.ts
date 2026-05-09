@@ -118,8 +118,8 @@ describe('runApproveButton', () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad snapshot (handler)
-    //   2) SELECT ad+tier weight (service lookup)
-    //   3) BEGIN (approveAd transaction)
+    //   2) BEGIN ISOLATION LEVEL REPEATABLE READ (approveAd transaction)
+    //   3) SELECT ad+tier weight (service lookup, inside tx)
     //   4) UPDATE ads (optimistic) — rowCount: 1
     //   5) SELECT starts_at
     //   6) INSERT review_logs
@@ -129,8 +129,8 @@ describe('runApproveButton', () => {
     const client = mockClient(
       [
         { rows: [adRow] },
-        { rows: [tierRow] },
         { rows: [] }, // BEGIN
+        { rows: [tierRow] }, // lookup
         { rows: [], rowCount: 1 },
         { rows: [{ starts_at: persistedStartsAt }] },
         { rows: [] }, // INSERT review_logs
@@ -205,8 +205,8 @@ describe('runApproveButton', () => {
     const captured: CapturedCall[] = [];
     // Query order:
     //   1) SELECT ad snapshot
-    //   2) SELECT tier
-    //   3) BEGIN
+    //   2) BEGIN ISOLATION LEVEL REPEATABLE READ
+    //   3) SELECT tier (lookup, inside tx)
     //   4) UPDATE ads (approve)
     //   5) SELECT starts_at
     //   6) INSERT review_logs
@@ -219,8 +219,8 @@ describe('runApproveButton', () => {
     const client = mockClient(
       [
         { rows: [adRow] },
-        { rows: [tierRow] },
         { rows: [] }, // BEGIN
+        { rows: [tierRow] }, // lookup
         { rows: [], rowCount: 1 },
         { rows: [{ starts_at: persistedStartsAt }] },
         { rows: [] }, // INSERT review_logs
@@ -265,14 +265,14 @@ describe('runApproveButton', () => {
   it('blocked DM + createGuildChannel fails: ephemeral notes failure', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const captured: CapturedCall[] = [];
-    // Query order: snapshot, tier, BEGIN, UPDATE, SELECT starts_at, INSERT log,
-    // COMMIT, dm UPDATE (failed), SELECT findActiveFallback (empty)
+    // Query order: snapshot, BEGIN, lookup tier, UPDATE, SELECT starts_at,
+    // INSERT log, COMMIT, dm UPDATE (failed), SELECT findActiveFallback (empty)
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
         { rows: [adRow] },
-        { rows: [tierRow] },
         { rows: [] }, // BEGIN
+        { rows: [tierRow] }, // lookup
         { rows: [], rowCount: 1 },
         { rows: [{ starts_at: persistedStartsAt }] },
         { rows: [] }, // INSERT review_logs
@@ -334,7 +334,9 @@ describe('runApproveButton', () => {
   it('returns ephemeral when sponsor has no tier (no_tier)', async () => {
     const client = mockClient([
       { rows: [adRow] },
-      { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: null }] },
+      { rows: [] }, // BEGIN
+      { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: null }] }, // lookup
+      { rows: [] }, // ROLLBACK
     ]);
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
@@ -347,7 +349,9 @@ describe('runApproveButton', () => {
   it('returns ephemeral when sponsor_id is null on the ad (no_sponsor)', async () => {
     const client = mockClient([
       { rows: [{ ...adRow, sponsor_id: null }] },
-      { rows: [{ sponsor_id: null, status: 'pending', weight: 7 }] },
+      { rows: [] }, // BEGIN
+      { rows: [{ sponsor_id: null, status: 'pending', weight: 7 }] }, // lookup
+      { rows: [] }, // ROLLBACK
     ]);
     const res = await invoke(buildPayload(), defaultDeps(client));
     const json = (await res.json()) as { type: number; data: { content: string } };
@@ -360,8 +364,8 @@ describe('runApproveButton', () => {
     const client = mockClient(
       [
         { rows: [adRow] },
-        { rows: [tierRow] },
         { rows: [] }, // BEGIN
+        { rows: [tierRow] }, // lookup
         { rows: [], rowCount: 0 }, // UPDATE — already moved
         { rows: [] }, // ROLLBACK
       ],
@@ -381,8 +385,8 @@ describe('runApproveButton', () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
       { rows: [adRow] },
-      { rows: [tierRow] },
       { rows: [] }, // BEGIN
+      { rows: [tierRow] }, // lookup
       { rows: [], rowCount: 1 },
       { rows: [{ starts_at: persistedStartsAt }] },
       { rows: [] }, // INSERT review_logs
@@ -405,8 +409,8 @@ describe('runApproveButton', () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
       { rows: [{ ...adRow, review_message_id: null }] },
-      { rows: [tierRow] },
       { rows: [] }, // BEGIN
+      { rows: [tierRow] }, // lookup
       { rows: [], rowCount: 1 },
       { rows: [{ starts_at: persistedStartsAt }] },
       { rows: [] }, // INSERT review_logs
