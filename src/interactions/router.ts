@@ -7,6 +7,7 @@ import type {
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
+import { handleReviewApproveButton } from './buttons/review-approve-button.ts';
 import { handleReviewRejectButton } from './buttons/review-reject-button.ts';
 import { handleAdList } from './commands/ad-list.ts';
 import { handleAdRules } from './commands/ad-rules.ts';
@@ -120,7 +121,7 @@ interactions.post('/', async (c) => {
         return handleAdWithdrawButton(c, mc);
       }
       if (cid.startsWith('review:approve:')) {
-        return c.json({ error: 'review approve handler ships in P3.3' }, 501);
+        return handleReviewApproveButton(c, mc);
       }
       if (cid.startsWith('review:reject:')) {
         return handleReviewRejectButton(c, mc);
