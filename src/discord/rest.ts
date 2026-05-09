@@ -51,6 +51,8 @@ export function createDiscordRest(o: DiscordRestOptions) {
       request<Message>(opts, 'POST', `/channels/${channelId}/messages`, body),
     editMessage: (channelId: string, messageId: string, body: Json) =>
       request<Message>(opts, 'PATCH', `/channels/${channelId}/messages/${messageId}`, body),
+    deleteMessage: (channelId: string, messageId: string) =>
+      request<void>(opts, 'DELETE', `/channels/${channelId}/messages/${messageId}`),
     createGuildChannel: (guildId: string, body: Json) =>
       request<Channel>(opts, 'POST', `/guilds/${guildId}/channels`, body),
     getGuildMember: (guildId: string, userId: string) =>

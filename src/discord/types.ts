@@ -6,6 +6,54 @@ export const InteractionType = {
   MODAL_SUBMIT: 5,
 } as const;
 
+export const ComponentType = {
+  ACTION_ROW: 1,
+  BUTTON: 2,
+  STRING_SELECT: 3,
+  TEXT_INPUT: 4,
+  CHANNEL_SELECT: 8,
+} as const;
+export type ComponentType = (typeof ComponentType)[keyof typeof ComponentType];
+
+export const ButtonStyle = {
+  PRIMARY: 1,
+  SECONDARY: 2,
+  SUCCESS: 3,
+  DANGER: 4,
+  LINK: 5,
+} as const;
+export type ButtonStyle = (typeof ButtonStyle)[keyof typeof ButtonStyle];
+
+type BaseButtonProps = {
+  type: 2; // BUTTON
+  label?: string;
+  emoji?: { name: string };
+  disabled?: boolean;
+};
+
+export type LinkButtonComponent = BaseButtonProps & {
+  style: typeof ButtonStyle.LINK; // 5
+  url: string;
+  // custom_id intentionally absent
+};
+
+export type InteractiveButtonComponent = BaseButtonProps & {
+  style:
+    | typeof ButtonStyle.PRIMARY
+    | typeof ButtonStyle.SECONDARY
+    | typeof ButtonStyle.SUCCESS
+    | typeof ButtonStyle.DANGER;
+  custom_id: string;
+  // url intentionally absent
+};
+
+export type ButtonComponent = LinkButtonComponent | InteractiveButtonComponent;
+
+export type ActionRowComponent = {
+  type: 1; // ACTION_ROW
+  components: ButtonComponent[];
+};
+
 export const InteractionResponseType = {
   PONG: 1,
   CHANNEL_MESSAGE_WITH_SOURCE: 4,
@@ -57,6 +105,7 @@ export type ApplicationCommandInteractionPayload = {
   member?: {
     user: { id: string; username?: string };
     roles?: string[];
+    permissions?: string;
   };
   user?: { id: string; username?: string };
   data: {
@@ -121,4 +170,25 @@ export type ModalResponse = {
   custom_id: string;
   title: string;
   components: ModalResponseActionRow[];
+};
+
+// Message component (button click) interaction payload
+export type MessageComponentInteractionPayload = {
+  type: typeof InteractionType.MESSAGE_COMPONENT;
+  id: string;
+  application_id: string;
+  guild_id?: string;
+  channel_id?: string;
+  member?: {
+    user: { id: string; username?: string };
+    roles?: string[];
+    permissions?: string;
+  };
+  user?: { id: string; username?: string };
+  data: {
+    custom_id: string;
+    component_type: number;
+    values?: string[];
+  };
+  message?: { id: string; channel_id: string };
 };

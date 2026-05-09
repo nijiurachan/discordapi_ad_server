@@ -40,7 +40,7 @@ describe('/interactions router → command/modal dispatch (integration)', () => 
     expect(json.error).toBe('unknown command');
   });
 
-  it('returns 501 with "unknown command" when /ad has no submit subcommand', async () => {
+  it('returns 501 with "unknown ad subcommand" when /ad has no submit subcommand', async () => {
     const body = JSON.stringify({
       type: 2,
       id: 'int-1',
@@ -55,7 +55,7 @@ describe('/interactions router → command/modal dispatch (integration)', () => 
     const res = await post(body);
     expect(res.status).toBe(501);
     const json = (await res.json()) as { error: string };
-    expect(json.error).toBe('unknown command');
+    expect(json.error).toBe('unknown ad subcommand');
   });
 
   it('returns 501 with "unknown modal" for a modal submit with unrecognized custom_id', async () => {
