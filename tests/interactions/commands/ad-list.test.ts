@@ -48,19 +48,27 @@ async function invoke(deps: AdListDeps, userId = 'user-1'): Promise<Response> {
 }
 
 describe('runAdList', () => {
-  it('empty result → ephemeral "まだ広告が登録されていません"', async () => {
-    const client = mockClient([{ rows: [] }]);
-    const res = await invoke({
-      client,
-      s3: mockS3(),
-      bucket: 'b',
-      presignTtlSeconds: 300,
-      presignImpl: vi.fn(),
-    });
+  it('empty result → ephemeral "まだ広告が登録されていません"; query is scoped to invoking user', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient([{ rows: [] }], captured);
+    const res = await invoke(
+      {
+        client,
+        s3: mockS3(),
+        bucket: 'b',
+        presignTtlSeconds: 300,
+        presignImpl: vi.fn(),
+      },
+      'user-42',
+    );
     const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
     expect(json.type).toBe(4);
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('まだ広告が登録されていません');
+    // The SELECT must filter by sponsor_id and bind the invoking user's id.
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.sql).toMatch(/WHERE\s+sponsor_id\s*=\s*\$1/i);
+    expect(captured[0]?.params?.[0]).toBe('user-42');
   });
 
   it('3 ads → 3 embeds with image url; presign called per image', async () => {
