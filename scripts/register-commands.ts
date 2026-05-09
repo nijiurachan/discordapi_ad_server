@@ -44,6 +44,48 @@ const commands = [
           },
         ],
       },
+      {
+        name: 'list',
+        description: '自分の広告一覧を表示',
+        type: 1,
+      },
+      {
+        name: 'withdraw',
+        description: '自分の広告を取り下げる',
+        type: 1,
+        options: [
+          {
+            name: 'id',
+            description: '広告 ID',
+            type: 3, // STRING
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'stats',
+        description: '自分の広告の統計を表示',
+        type: 1,
+        options: [
+          {
+            name: 'period',
+            description: '集計期間',
+            type: 3, // STRING
+            required: false,
+            choices: [
+              { name: '24h', value: '24h' },
+              { name: '7d', value: '7d' },
+              { name: '30d', value: '30d' },
+              { name: 'all', value: 'all' },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'rules',
+        description: '入稿ルールを表示',
+        type: 1,
+      },
     ],
   },
   {
