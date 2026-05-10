@@ -33,6 +33,15 @@ function getOrCreatePool(url: string, opts: CreatePgClientOptions): pg.Pool {
     connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
     query_timeout: opts.queryTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
   });
+  // pg.Pool emits 'error' on background connection failures (idle client
+  // disconnect, backend restart, etc.). An unhandled 'error' on an
+  // EventEmitter crashes Node — log instead and let the pool's own
+  // reconnect logic recover. We deliberately don't evict the pool here:
+  // aggressive teardown could race with in-flight queries and the next
+  // borrow will exercise reconnect anyway.
+  pool.on('error', (err) => {
+    console.error('pg pool: background client error', { url, err });
+  });
   POOLS.set(url, pool);
   return pool;
 }

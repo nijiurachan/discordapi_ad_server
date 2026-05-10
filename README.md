@@ -14,7 +14,7 @@ Discord 連動の広告配信サーバ。詳細は [仕様書](docs/superpowers/
 
 ### 必要要件
 
-- Node.js 20.10 以上
+- Node.js 24 以上
 - 既存 PostgreSQL（外部から TLS で到達可能）
 - 既存 NAS の S3 互換エンドポイント（HTTPS、AWS SDK 互換）
 - Cloudflare Workers アカウント
