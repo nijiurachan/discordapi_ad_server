@@ -6,7 +6,9 @@ describe('buildAdminMenuMessage', () => {
 
   it('has a single embed with the admin console title', () => {
     expect(menu.embeds).toHaveLength(1);
-    expect(menu.embeds[0].title).toContain('広告管理コンソール');
+    const first = menu.embeds[0];
+    expect(first).toBeDefined();
+    expect(first?.title).toContain('広告管理コンソール');
   });
 
   it('has 4 action rows', () => {

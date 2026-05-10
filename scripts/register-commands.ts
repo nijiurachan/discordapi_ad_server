@@ -89,6 +89,73 @@ const commands = [
     ],
   },
   {
+    name: 'admin',
+    description: '管理者向けコマンド',
+    type: 1,
+    default_member_permissions: '8', // ADMINISTRATOR
+    options: [
+      {
+        name: 'submit',
+        description: '管理者として広告を投入（Tier/Fallback チェックをスキップ）',
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: 'kind',
+            description: '広告種別',
+            type: 3, // STRING
+            required: true,
+            choices: [
+              { name: 'regular', value: 'regular' },
+              { name: 'house', value: 'house' },
+              { name: 'placeholder', value: 'placeholder' },
+            ],
+          },
+          {
+            name: 'slot',
+            description: 'スロット',
+            type: 3,
+            required: true,
+            choices: [{ name: 'default', value: 'default' }],
+          },
+          {
+            name: 'image',
+            description: 'バナー画像',
+            type: 11, // ATTACHMENT
+            required: true,
+          },
+          {
+            name: 'weight',
+            description: '重み（1-1000、規定: kind依存）',
+            type: 4, // INTEGER
+            required: false,
+            min_value: 1,
+            max_value: 1000,
+          },
+          {
+            name: 'sponsor_id',
+            description: 'sponsor の Discord User ID（regular のみ）',
+            type: 3, // STRING
+            required: false,
+          },
+          {
+            name: 'auto_approve',
+            description: 'true なら status=approved で即時開始',
+            type: 5, // BOOLEAN
+            required: false,
+          },
+          {
+            name: 'ends_in_days',
+            description: '配信終了までの日数（1-365、未指定で無期限）',
+            type: 4,
+            required: false,
+            min_value: 1,
+            max_value: 365,
+          },
+        ],
+      },
+    ],
+  },
+  {
     name: 'ad-setup',
     description: '常設メニューを指定チャンネルに投稿',
     type: 1,

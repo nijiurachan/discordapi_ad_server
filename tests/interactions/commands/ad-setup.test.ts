@@ -204,8 +204,15 @@ describe('runAdSetup', () => {
 
   it('kind=admin: posts admin menu and persists message/channel ids', async () => {
     const client = mockClient([]);
-    const createMessage = vi.fn(async () => ({ id: 'admin-msg', channel_id: 'chan-target' }));
-    const deleteMessage = vi.fn(async () => undefined);
+    type MenuBody = {
+      embeds: Array<{ title: string }>;
+      components: Array<{ components: unknown[] }>;
+    };
+    const createMessage = vi.fn(async (_channelId: string, _body: MenuBody) => ({
+      id: 'admin-msg',
+      channel_id: 'chan-target',
+    }));
+    const deleteMessage = vi.fn(async (_channelId: string, _messageId: string) => undefined);
     const rest = { createMessage, deleteMessage } as unknown as DiscordRest;
 
     const res = await invoke(buildPayload({ kind: 'admin' }), {
@@ -218,12 +225,10 @@ describe('runAdSetup', () => {
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('admin');
     expect(createMessage).toHaveBeenCalledTimes(1);
-    const [, body] = createMessage.mock.calls[0];
-    const menuBody = body as {
-      embeds: Array<{ title: string }>;
-      components: Array<{ components: unknown[] }>;
-    };
-    expect(menuBody.embeds[0].title).toContain('広告管理コンソール');
+    const menuBody = createMessage.mock.calls[0]?.[1];
+    expect(menuBody).toBeDefined();
+    if (!menuBody) throw new Error('createMessage should have been called');
+    expect(menuBody.embeds[0]?.title).toContain('広告管理コンソール');
     const totalButtons = menuBody.components.reduce((acc, row) => acc + row.components.length, 0);
     expect(totalButtons).toBe(16);
   });

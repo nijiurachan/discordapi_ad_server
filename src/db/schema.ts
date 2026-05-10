@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigserial,
+  boolean,
   check,
   index,
   integer,
@@ -118,15 +119,20 @@ export const adFormatRules = pgTable('ad_format_rules', {
 
 export const adDrafts = pgTable('ad_drafts', {
   id: uuid('id').primaryKey().defaultRandom(),
-  sponsorId: text('sponsor_id')
-    .notNull()
-    .references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
+  // Nullable for admin-submitted house/placeholder drafts that have no sponsor.
+  sponsorId: text('sponsor_id').references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
   slot: text('slot').notNull(),
   imageKey: text('image_key').notNull(),
   imageMime: text('image_mime').notNull(),
   imageBytes: integer('image_bytes').notNull(),
   imageWidth: integer('image_width'),
   imageHeight: integer('image_height'),
+  // Admin-submit extras (NULL for sponsor-submitted drafts).
+  kind: text('kind'),
+  weight: integer('weight'),
+  autoApprove: boolean('auto_approve'),
+  endsInDays: integer('ends_in_days'),
+  createdByAdmin: text('created_by_admin'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
