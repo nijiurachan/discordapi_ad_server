@@ -44,8 +44,9 @@ function buttonPayload(customId: string, roles: string[]) {
 }
 
 describe('admin buttons (adm:* dispatcher)', () => {
-  it('returns ephemeral ACK for an admin pressing a known adm:* button', async () => {
-    const res = await postSigned(buttonPayload(AdminButtonIds.ADS_LIST, ['6']));
+  it('returns ephemeral ACK stub for not-yet-implemented adm:* buttons', async () => {
+    // STATS_OVERVIEW is still a stub in P6.3; once P6.9 lands this should be updated.
+    const res = await postSigned(buttonPayload(AdminButtonIds.STATS_OVERVIEW, ['6']));
     expect(res.status).toBe(200);
     const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
     expect(json.type).toBe(4);
@@ -54,7 +55,7 @@ describe('admin buttons (adm:* dispatcher)', () => {
   });
 
   it('rejects non-admin members with permission error (ephemeral)', async () => {
-    const res = await postSigned(buttonPayload(AdminButtonIds.STATS_OVERVIEW, ['someone-else']));
+    const res = await postSigned(buttonPayload(AdminButtonIds.STATS_OVERVIEW, ['some-other-role']));
     expect(res.status).toBe(200);
     const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
     expect(json.type).toBe(4);
