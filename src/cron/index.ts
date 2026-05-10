@@ -1,6 +1,7 @@
 import { withPgClient } from '../db/client.ts';
 import type { Bindings } from '../env.ts';
 import { createS3Client } from '../storage/s3.ts';
+import { expireAds } from './expire-ads.ts';
 import { sweepExpiredDrafts } from './sweep-drafts.ts';
 
 export const HOURLY_CRON = '0 * * * *';
@@ -46,6 +47,11 @@ async function runHourly(env: Bindings): Promise<void> {
       sweepExpiredDrafts(client, s3, env.S3_BUCKET),
     );
     console.log('cron.hourly.sweep-drafts', result);
+  });
+
+  await runSafely('expire-ads', async () => {
+    const result = await withPgClient(env.POSTGRES_URL, (client) => expireAds(client));
+    console.log('cron.hourly.expire-ads', result);
   });
 }
 
