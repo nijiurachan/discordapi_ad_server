@@ -141,9 +141,13 @@ export const adEvents = pgTable(
   'ad_events',
   {
     id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    // NO ACTION (not cascade) is intentional: ad_events is the impression/click
+    // audit trail and must survive ads being soft-deleted (status='expired' /
+    // 'withdrawn'). Hard-deleting an ad row should fail loudly here rather
+    // than silently destroy historical traffic data.
     adId: uuid('ad_id')
       .notNull()
-      .references(() => ads.id),
+      .references(() => ads.id, { onDelete: 'no action' }),
     eventType: text('event_type').notNull(),
     ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
     ipHash: text('ip_hash'),
@@ -162,9 +166,12 @@ export const reviewLogs = pgTable(
   'review_logs',
   {
     id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    // NO ACTION (not cascade) is intentional: review_logs is the moderator
+    // audit trail (approve/reject/withdraw decisions) and must outlive any
+    // hard-delete of the parent ad. The same rationale as ad_events above.
     adId: uuid('ad_id')
       .notNull()
-      .references(() => ads.id),
+      .references(() => ads.id, { onDelete: 'no action' }),
     reviewerId: text('reviewer_id').notNull(),
     action: text('action').notNull(),
     reason: text('reason'),
