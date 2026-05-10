@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   bigserial,
   boolean,
   check,
@@ -8,6 +9,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  pgView,
   serial,
   text,
   timestamp,
@@ -141,9 +143,13 @@ export const adEvents = pgTable(
   'ad_events',
   {
     id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    // NO ACTION (not cascade) is intentional: ad_events is the impression/click
+    // audit trail and must survive ads being soft-deleted (status='expired' /
+    // 'withdrawn'). Hard-deleting an ad row should fail loudly here rather
+    // than silently destroy historical traffic data.
     adId: uuid('ad_id')
       .notNull()
-      .references(() => ads.id),
+      .references(() => ads.id, { onDelete: 'no action' }),
     eventType: text('event_type').notNull(),
     ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
     ipHash: text('ip_hash'),
@@ -162,9 +168,12 @@ export const reviewLogs = pgTable(
   'review_logs',
   {
     id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    // NO ACTION (not cascade) is intentional: review_logs is the moderator
+    // audit trail (approve/reject/withdraw decisions) and must outlive any
+    // hard-delete of the parent ad. The same rationale as ad_events above.
     adId: uuid('ad_id')
       .notNull()
-      .references(() => ads.id),
+      .references(() => ads.id, { onDelete: 'no action' }),
     reviewerId: text('reviewer_id').notNull(),
     action: text('action').notNull(),
     reason: text('reason'),
@@ -217,3 +226,20 @@ export const dmFallbackChannels = pgTable(
       .where(sql`${t.acknowledgedAt} IS NULL`),
   }),
 );
+
+/**
+ * Daily-bucketed impression/click counts. Hand-managed by
+ * migrations/0004_ad_stats_daily_view.sql; declared `.existing()` so
+ * drizzle-kit doesn't try to redefine it.
+ *
+ * Use for whole-day reports (admin dashboards). Sponsor-facing rolling
+ * windows (`24h` / `7d` / `30d`) deliberately query `ad_events` directly
+ * — see the comment on `getAggregateStats` in src/db/queries/ads.ts for
+ * why bucketing to days would lose intra-day boundary events.
+ */
+export const adStatsDaily = pgView('ad_stats_daily', {
+  adId: uuid('ad_id').notNull(),
+  day: timestamp('day', { withTimezone: true }).notNull(),
+  impressions: bigint('impressions', { mode: 'bigint' }).notNull(),
+  clicks: bigint('clicks', { mode: 'bigint' }).notNull(),
+}).existing();

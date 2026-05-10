@@ -9,6 +9,14 @@ enabled = true
 [triggers]
 crons = ["0 * * * *", "0 0 * * *"]
 
+# Hyperdrive: route hot-path DB connections through Cloudflare's proxy/pool.
+# Uncomment and fill in `id` per env once a Hyperdrive instance is provisioned
+# (`wrangler hyperdrive create`). Optional — falls back to POSTGRES_URL when
+# the binding is absent (see resolveDbUrl in src/db/client.ts).
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<hyperdrive-id-default>"
+
 [[unsafe.bindings]]
 name = "SERVE_RATE_LIMITER"
 type = "ratelimit"
@@ -27,6 +35,10 @@ name = "discordapi-ad-server-staging"
 [env.staging.triggers]
 crons = ["0 * * * *", "0 0 * * *"]
 
+# [[env.staging.hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<hyperdrive-id-staging>"
+
 [[env.staging.unsafe.bindings]]
 name = "SERVE_RATE_LIMITER"
 type = "ratelimit"
@@ -44,6 +56,10 @@ name = "discordapi-ad-server"
 
 [env.production.triggers]
 crons = ["0 * * * *", "0 0 * * *"]
+
+# [[env.production.hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<hyperdrive-id-production>"
 
 [[env.production.unsafe.bindings]]
 name = "SERVE_RATE_LIMITER"

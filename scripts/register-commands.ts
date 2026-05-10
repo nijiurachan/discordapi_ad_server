@@ -1,8 +1,9 @@
-// Usage: tsx scripts/register-commands.ts
+// Usage: npm run discord:register
 //
 // Registers slash commands to a guild via Discord REST API.
-// Required env vars must be exported in the shell or sourced from .dev.vars
-// before running (this script does not load any .env file itself).
+// Env vars are loaded from .dev.vars by the npm script's `dotenv -e .dev.vars`
+// wrapper. Direct `tsx scripts/register-commands.ts` invocation requires the
+// vars to be exported in the shell.
 
 import process from 'node:process';
 

@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../db/client.ts';
 import type { Bindings } from '../env.ts';
 import { createS3Client, getObject } from '../storage/s3.ts';
 
@@ -40,7 +40,7 @@ export async function handleImage(c: Context<{ Bindings: Bindings }>): Promise<R
   if (cached) return cached;
 
   // DB lookup
-  const meta = await withPgClient(c.env.POSTGRES_URL, (client) => getAdImage(client, adId));
+  const meta = await withPgClient(resolveDbUrl(c.env), (client) => getAdImage(client, adId));
   if (!meta) {
     return c.text('not found', 404);
   }
