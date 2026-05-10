@@ -29,6 +29,10 @@ import {
   handleAdminEditPickModal,
   handleAdminEditSubmitModal,
 } from './modals/admin-edit-modal.ts';
+import {
+  ADMIN_RULES_MODAL_PREFIX,
+  handleAdminRulesSubmitModal,
+} from './modals/admin-rules-modal.ts';
 import { handleAdminSubmitModal } from './modals/admin-submit-modal.ts';
 import { handleRejectModal } from './modals/review-reject-modal.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
@@ -186,6 +190,9 @@ interactions.post('/', async (c) => {
         }
         if (modalCid.startsWith(ADMIN_EDIT_MODAL_PREFIX)) {
           return handleAdminEditSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_RULES_MODAL_PREFIX)) {
+          return handleAdminRulesSubmitModal(c, modal);
         }
         if (modalCid.startsWith('review-reject-modal:')) {
           return handleRejectModal(c, modal);
