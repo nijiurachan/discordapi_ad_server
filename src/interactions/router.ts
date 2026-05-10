@@ -19,6 +19,7 @@ import { handleAdStatsButton, handleAdStatsCommand } from './commands/ad-stats.t
 import { handleAdSubmit } from './commands/ad-submit.ts';
 import { handleAdWithdrawButton, handleAdWithdrawCommand } from './commands/ad-withdraw.ts';
 import { handleAdminSubmit } from './commands/admin-submit.ts';
+import { handleAdminActionModal } from './modals/admin-action-modal.ts';
 import { handleAdminSubmitModal } from './modals/admin-submit-modal.ts';
 import { handleRejectModal } from './modals/review-reject-modal.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
@@ -162,6 +163,9 @@ interactions.post('/', async (c) => {
         }
         if (modalCid.startsWith('admin-submit:')) {
           return handleAdminSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith('admin-action:')) {
+          return handleAdminActionModal(c, modal);
         }
         if (modalCid.startsWith('review-reject-modal:')) {
           return handleRejectModal(c, modal);
