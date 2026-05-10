@@ -3,6 +3,7 @@ import type { PgClient } from '../../src/db/client.ts';
 import type { InsertEventResult } from '../../src/db/queries/ad-events.ts';
 import type { Bindings } from '../../src/env.ts';
 import type { ServedAd } from '../../src/serve/pick.ts';
+import { hashIP } from '../../src/utils/ip-hash.ts';
 
 // vi.hoisted is required because vi.mock calls are hoisted above all imports.
 // We need the mock fns to be initialized before vi.mock factories run.
@@ -97,6 +98,13 @@ describe('trackImpressions', () => {
       adId: '00000000-0000-0000-0000-000000000002',
       eventType: 'impression',
     });
+
+    // Assert exact daily-salted ipHash, not just the hex shape. This guards
+    // against a regression that swaps daily salt for the bootstrap fallback,
+    // or that forgets to hash and passes the raw IP through.
+    const expectedHash = await hashIP('1.2.3.4', 'test-salt');
+    expect(calls[0]?.[1]?.ipHash).toBe(expectedHash);
+    expect(calls[1]?.[1]?.ipHash).toBe(expectedHash);
   });
 
   it('skips placeholder ads', async () => {

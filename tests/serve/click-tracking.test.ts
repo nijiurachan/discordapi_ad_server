@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../src/db/client.ts';
 import type { InsertEventResult } from '../../src/db/queries/ad-events.ts';
 import type { Bindings } from '../../src/env.ts';
+import { hashIP } from '../../src/utils/ip-hash.ts';
 
 // vi.hoisted is required because vi.mock calls are hoisted above all imports.
 // We need the mock fns to be initialized before vi.mock factories run.
@@ -151,11 +152,16 @@ describe('handleClick tracking', () => {
       }),
     );
 
-    // The persisted ipHash MUST NOT equal the raw IP — it must be the hex hash.
+    // The persisted ipHash MUST NOT equal the raw IP — it must be the hex
+    // hash, AND it must be derived from the daily salt. Comparing against
+    // hashIP(ip, 'test-salt') (the daily-salt mock value) guards against a
+    // regression that falls back to IP_HASH_SALT_BOOTSTRAP.
     const callArgs = insertEventIfNotRecentMock.mock.calls[0]?.[1];
     expect(callArgs?.ipHash).toBeDefined();
     expect(callArgs?.ipHash).not.toBe('1.2.3.4');
     expect(callArgs?.ipHash).toMatch(/^[0-9a-f]{64}$/);
+    const expectedHash = await hashIP('1.2.3.4', 'test-salt');
+    expect(callArgs?.ipHash).toBe(expectedHash);
   });
 
   it('skips tracking for placeholder ad but still 302s', async () => {

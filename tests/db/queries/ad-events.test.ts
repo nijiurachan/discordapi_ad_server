@@ -110,7 +110,11 @@ describe('insertAdEvent', () => {
 describe('insertEventIfNotRecent', () => {
   it('returns ok=true with insertedId on happy path and captures all 6 params', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient([{ rows: [{ id: '42' }] }], captured);
+    // Response sequence: BEGIN, advisory lock SELECT, INSERT (returns row), COMMIT.
+    const client = mockClient(
+      [{ rows: [] }, { rows: [] }, { rows: [{ id: '42' }] }, { rows: [] }],
+      captured,
+    );
     const out = await insertEventIfNotRecent(client, {
       adId: 'ad-1',
       eventType: 'impression',
@@ -119,11 +123,12 @@ describe('insertEventIfNotRecent', () => {
       slot: 'default',
     });
     expect(out).toEqual({ ok: true, insertedId: 42n });
-    expect(captured[0]?.sql).toMatch(/INSERT INTO ad_events/);
-    expect(captured[0]?.sql).toMatch(/WHERE NOT EXISTS/);
-    expect(captured[0]?.sql).toMatch(/make_interval\(secs => \$6\)/);
-    expect(captured[0]?.sql).toMatch(/RETURNING id::text/);
-    expect(captured[0]?.params).toEqual([
+    // The INSERT is the third query (after BEGIN + advisory lock).
+    expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
+    expect(captured[2]?.sql).toMatch(/WHERE NOT EXISTS/);
+    expect(captured[2]?.sql).toMatch(/make_interval\(secs => \$6\)/);
+    expect(captured[2]?.sql).toMatch(/RETURNING id::text/);
+    expect(captured[2]?.params).toEqual([
       'ad-1',
       'impression',
       'iphash',
@@ -133,8 +138,30 @@ describe('insertEventIfNotRecent', () => {
     ]);
   });
 
+  it('advisory lock SQL is issued before INSERT and wrapped in BEGIN/COMMIT', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [{ rows: [] }, { rows: [] }, { rows: [{ id: '7' }] }, { rows: [] }],
+      captured,
+    );
+    await insertEventIfNotRecent(client, {
+      adId: 'ad-1',
+      eventType: 'click',
+      ipHash: 'iphash',
+      ua: null,
+      slot: null,
+    });
+    expect(captured).toHaveLength(4);
+    expect(captured[0]?.sql).toBe('BEGIN');
+    expect(captured[1]?.sql).toMatch(/pg_advisory_xact_lock\(hashtextextended\(/);
+    expect(captured[1]?.params).toEqual(['ad-1|iphash|click']);
+    expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
+    expect(captured[3]?.sql).toBe('COMMIT');
+  });
+
   it('returns ok=false reason=duplicate when no row inserted', async () => {
-    const client = mockClient([{ rows: [] }]);
+    // INSERT (3rd query) returns no rows → duplicate.
+    const client = mockClient([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }]);
     const out = await insertEventIfNotRecent(client, {
       adId: 'ad-1',
       eventType: 'click',
@@ -147,7 +174,10 @@ describe('insertEventIfNotRecent', () => {
 
   it('converts custom windowMs (60000) to 60 seconds in SQL params', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient([{ rows: [{ id: '1' }] }], captured);
+    const client = mockClient(
+      [{ rows: [] }, { rows: [] }, { rows: [{ id: '1' }] }, { rows: [] }],
+      captured,
+    );
     await insertEventIfNotRecent(
       client,
       {
@@ -159,12 +189,15 @@ describe('insertEventIfNotRecent', () => {
       },
       60000,
     );
-    expect(captured[0]?.params?.[5]).toBe(60);
+    expect(captured[2]?.params?.[5]).toBe(60);
   });
 
   it('clamps windowMs=0 to 1 second', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient([{ rows: [{ id: '1' }] }], captured);
+    const client = mockClient(
+      [{ rows: [] }, { rows: [] }, { rows: [{ id: '1' }] }, { rows: [] }],
+      captured,
+    );
     await insertEventIfNotRecent(
       client,
       {
@@ -176,6 +209,33 @@ describe('insertEventIfNotRecent', () => {
       },
       0,
     );
-    expect(captured[0]?.params?.[5]).toBe(1);
+    expect(captured[2]?.params?.[5]).toBe(1);
+  });
+
+  it('rolls back when INSERT throws and rethrows the error', async () => {
+    const captured: CapturedCall[] = [];
+    const client: PgClient = {
+      query: vi.fn(async (sql: string, params?: unknown[]) => {
+        captured.push({ sql, params });
+        if (sql.includes('INSERT INTO ad_events')) {
+          throw new Error('insert boom');
+        }
+        return { rows: [] };
+      }) as unknown as PgClient['query'],
+      end: vi.fn(async () => undefined),
+    };
+    await expect(
+      insertEventIfNotRecent(client, {
+        adId: 'ad-1',
+        eventType: 'impression',
+        ipHash: 'iphash',
+        ua: null,
+        slot: null,
+      }),
+    ).rejects.toThrow('insert boom');
+    expect(captured[0]?.sql).toBe('BEGIN');
+    expect(captured[1]?.sql).toMatch(/pg_advisory_xact_lock/);
+    expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
+    expect(captured[captured.length - 1]?.sql).toBe('ROLLBACK');
   });
 });
