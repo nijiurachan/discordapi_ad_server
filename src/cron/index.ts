@@ -4,6 +4,7 @@ import type { Bindings } from '../env.ts';
 import { createS3Client } from '../storage/s3.ts';
 import { sweepDmFallbackChannels } from './dm-fallback-sweep.ts';
 import { expireAds } from './expire-ads.ts';
+import { postSystemHealthSummary } from './health-summary.ts';
 import { rotateDailySalt } from './rotate-salt.ts';
 import { sweepAdEvents } from './sweep-ad-events.ts';
 import { sweepExpiredDrafts } from './sweep-drafts.ts';
@@ -76,6 +77,14 @@ async function runDaily(env: Bindings): Promise<void> {
   await runSafely('sweep-ad-events', async () => {
     const result = await withPgClient(env.POSTGRES_URL, (client) => sweepAdEvents(client));
     console.log('cron.daily.sweep-ad-events', result);
+  });
+
+  await runSafely('health-summary', async () => {
+    const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
+    const result = await withPgClient(env.POSTGRES_URL, (client) =>
+      postSystemHealthSummary(client, rest, env.ADMIN_CHANNEL_ID),
+    );
+    console.log('cron.daily.health-summary', result);
   });
 }
 
