@@ -19,6 +19,30 @@ const ACTION_BY_BUTTON: Record<string, { action: string; title: string }> = {
   [AdminButtonIds.ADS_END]: { action: 'force-end', title: '広告を強制終了' },
 };
 
+function adIdEditPickModal(): ModalResponse {
+  return {
+    custom_id: 'admin-edit-pick:open',
+    title: '編集対象の広告 ID',
+    components: [
+      {
+        type: 1,
+        components: [
+          {
+            type: 4,
+            custom_id: 'ad_id',
+            label: '対象広告 ID',
+            style: 1,
+            required: true,
+            min_length: 8,
+            max_length: 40,
+            placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function adIdModal(action: string, title: string): ModalResponse {
   return {
     custom_id: `${ADMIN_ACTION_MODAL_PREFIX}${action}`,
@@ -56,6 +80,9 @@ export async function handleAdminButton(
   }
   if (id === AdminButtonIds.ADS_LIST) {
     return handleAdminAdsListEntry(c, payload);
+  }
+  if (id === AdminButtonIds.ADS_EDIT) {
+    return c.json({ type: InteractionResponseType.MODAL, data: adIdEditPickModal() });
   }
   const actionMapping = ACTION_BY_BUTTON[id];
   if (actionMapping) {

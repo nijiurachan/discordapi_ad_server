@@ -95,6 +95,25 @@ const commands = [
     default_member_permissions: '8', // ADMINISTRATOR
     options: [
       {
+        name: 'replace-image',
+        description: '広告の画像を差し替える',
+        type: 1,
+        options: [
+          {
+            name: 'ad_id',
+            description: '対象広告 ID',
+            type: 3,
+            required: true,
+          },
+          {
+            name: 'image',
+            description: '新しいバナー画像',
+            type: 11,
+            required: true,
+          },
+        ],
+      },
+      {
         name: 'submit',
         description: '管理者として広告を投入（Tier/Fallback チェックをスキップ）',
         type: 1, // SUB_COMMAND

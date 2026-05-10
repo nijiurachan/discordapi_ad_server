@@ -18,8 +18,17 @@ import { handleAdSetup } from './commands/ad-setup.ts';
 import { handleAdStatsButton, handleAdStatsCommand } from './commands/ad-stats.ts';
 import { handleAdSubmit } from './commands/ad-submit.ts';
 import { handleAdWithdrawButton, handleAdWithdrawCommand } from './commands/ad-withdraw.ts';
+import { handleAdminReplaceImage } from './commands/admin-replace-image.ts';
 import { handleAdminSubmit } from './commands/admin-submit.ts';
 import { handleAdminActionModal } from './modals/admin-action-modal.ts';
+import {
+  ADMIN_EDIT_MODAL_PREFIX,
+  ADMIN_EDIT_OPEN_PREFIX,
+  ADMIN_EDIT_PICK_PREFIX,
+  handleAdminEditOpenButton,
+  handleAdminEditPickModal,
+  handleAdminEditSubmitModal,
+} from './modals/admin-edit-modal.ts';
 import { handleAdminSubmitModal } from './modals/admin-submit-modal.ts';
 import { handleRejectModal } from './modals/review-reject-modal.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
@@ -111,6 +120,8 @@ interactions.post('/', async (c) => {
         switch (sub?.name) {
           case 'submit':
             return handleAdminSubmit(c, cmd);
+          case 'replace-image':
+            return handleAdminReplaceImage(c, cmd);
           default:
             return c.json({ error: 'unknown admin subcommand' }, 501);
         }
@@ -151,6 +162,9 @@ interactions.post('/', async (c) => {
       if (cid.startsWith('adlist:')) {
         return handleAdminAdsListButton(c, mc);
       }
+      if (cid.startsWith(ADMIN_EDIT_OPEN_PREFIX)) {
+        return handleAdminEditOpenButton(c, mc);
+      }
       return c.json({ error: 'unknown component' }, 501);
     }
 
@@ -166,6 +180,12 @@ interactions.post('/', async (c) => {
         }
         if (modalCid.startsWith('admin-action:')) {
           return handleAdminActionModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_EDIT_PICK_PREFIX)) {
+          return handleAdminEditPickModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_EDIT_MODAL_PREFIX)) {
+          return handleAdminEditSubmitModal(c, modal);
         }
         if (modalCid.startsWith('review-reject-modal:')) {
           return handleRejectModal(c, modal);
