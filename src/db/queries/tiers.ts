@@ -70,12 +70,12 @@ export async function upsertTier(
 
 export async function deleteTier(client: PgClient, tierId: number): Promise<TierMutationError> {
   const refRes = await client.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM sponsors WHERE current_tier_id = $1`,
+    'SELECT COUNT(*)::text AS count FROM sponsors WHERE current_tier_id = $1',
     [tierId],
   );
   if (Number(refRes.rows[0]?.count ?? '0') > 0) {
     return { ok: false, reason: 'sponsor_referenced' };
   }
-  await client.query(`DELETE FROM tiers WHERE id = $1`, [tierId]);
+  await client.query('DELETE FROM tiers WHERE id = $1', [tierId]);
   return { ok: true };
 }

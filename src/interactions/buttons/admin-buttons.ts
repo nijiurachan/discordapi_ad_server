@@ -12,6 +12,7 @@ import { ADMIN_ACTION_MODAL_PREFIX } from '../modals/admin-action-modal.ts';
 import { handleAdminRulesEntry } from '../modals/admin-rules-modal.ts';
 import { handleAdminTiersEntry } from '../modals/admin-tiers-modal.ts';
 import { ephemeral } from '../responses.ts';
+import { handleAdminSystemButton } from './admin-system-buttons.ts';
 
 const KNOWN_BUTTON_IDS = new Set<string>(Object.values(AdminButtonIds));
 
@@ -97,6 +98,13 @@ export async function handleAdminButton(
   }
   if (id === AdminButtonIds.SETTINGS_PLACEHOLDER) {
     return handleAdminAdsListEntry(c, payload, { kind: 'placeholder' });
+  }
+  if (
+    id === AdminButtonIds.SYSTEM_REPOST ||
+    id === AdminButtonIds.SYSTEM_ROTATE_SALT ||
+    id === AdminButtonIds.SYSTEM_HEALTH
+  ) {
+    return handleAdminSystemButton(c, payload, id);
   }
   const actionMapping = ACTION_BY_BUTTON[id];
   if (actionMapping) {

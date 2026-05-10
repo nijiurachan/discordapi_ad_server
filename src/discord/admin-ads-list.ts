@@ -79,7 +79,7 @@ export function buildAdminAdsListEmbed(
   const desc =
     result.ads.length === 0
       ? `${filterLabel}\n\n該当する広告はありません。`
-      : `${filterLabel}\n\n` + result.ads.map(adLine).join('\n');
+      : `${filterLabel}\n\n${result.ads.map(adLine).join('\n')}`;
   return {
     title: `📋 全広告一覧 (${result.totalCount} 件 / page ${result.page}/${result.totalPages})`,
     description: desc,
