@@ -4,6 +4,7 @@ import type { Bindings } from '../env.ts';
 import { createS3Client } from '../storage/s3.ts';
 import { sweepDmFallbackChannels } from './dm-fallback-sweep.ts';
 import { expireAds } from './expire-ads.ts';
+import { rotateDailySalt } from './rotate-salt.ts';
 import { sweepAdEvents } from './sweep-ad-events.ts';
 import { sweepExpiredDrafts } from './sweep-drafts.ts';
 
@@ -67,6 +68,11 @@ async function runHourly(env: Bindings): Promise<void> {
 }
 
 async function runDaily(env: Bindings): Promise<void> {
+  await runSafely('rotate-salt', async () => {
+    const result = await withPgClient(env.POSTGRES_URL, (client) => rotateDailySalt(client));
+    console.log('cron.daily.rotate-salt', result);
+  });
+
   await runSafely('sweep-ad-events', async () => {
     const result = await withPgClient(env.POSTGRES_URL, (client) => sweepAdEvents(client));
     console.log('cron.daily.sweep-ad-events', result);
