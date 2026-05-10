@@ -1,4 +1,7 @@
+import { withPgClient } from '../db/client.ts';
 import type { Bindings } from '../env.ts';
+import { createS3Client } from '../storage/s3.ts';
+import { sweepExpiredDrafts } from './sweep-drafts.ts';
 
 export const HOURLY_CRON = '0 * * * *';
 export const DAILY_CRON = '0 0 * * *';
@@ -31,10 +34,34 @@ export async function dispatchCron(
   console.warn('cron: unrecognized schedule, ignoring', { cron });
 }
 
-async function runHourly(_env: Bindings): Promise<void> {
-  // Filled in by P7.1 / P7.2 / P7.3.
+async function runHourly(env: Bindings): Promise<void> {
+  await runSafely('sweep-drafts', async () => {
+    const s3 = createS3Client({
+      endpoint: env.S3_ENDPOINT,
+      region: env.S3_REGION,
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    });
+    const result = await withPgClient(env.POSTGRES_URL, (client) =>
+      sweepExpiredDrafts(client, s3, env.S3_BUCKET),
+    );
+    console.log('cron.hourly.sweep-drafts', result);
+  });
 }
 
 async function runDaily(_env: Bindings): Promise<void> {
   // Filled in by P7.4 / P7.5 / P7.6.
+}
+
+/**
+ * Run a single cron task and contain its failure. We log but do not rethrow
+ * so one failing task cannot mask the rest of the schedule's work; the
+ * outer dispatch only rethrows on truly unexpected errors.
+ */
+async function runSafely(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    console.error(`cron task failed: ${name}`, err);
+  }
 }
