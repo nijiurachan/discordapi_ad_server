@@ -147,6 +147,26 @@ export async function runAdminSubmitModal(
 
   const isAutoApproved = draft.autoApprove || draft.kind !== 'regular';
   const status = isAutoApproved ? 'approved' : 'pending';
+
+  if (draft.kind === 'placeholder') {
+    const dup = await deps.client.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM ads
+        WHERE kind = 'placeholder' AND slot = $1 AND status = 'approved'`,
+      [draft.slot],
+    );
+    if (Number(dup.rows[0]?.count ?? '0') > 0) {
+      try {
+        await deleteObject(deps.s3, deps.bucket, finalKey);
+      } catch (e) {
+        console.error('admin-submit-modal: cleanup after placeholder dup failed', e);
+      }
+      return ephemeral(
+        c,
+        `❌ slot=\`${draft.slot}\` の placeholder は既に存在します。先に既存を強制終了してください。`,
+      );
+    }
+  }
   const startsAt = isAutoApproved ? 'now()' : 'NULL';
   const endsAtClause =
     draft.endsInDays && draft.endsInDays > 0

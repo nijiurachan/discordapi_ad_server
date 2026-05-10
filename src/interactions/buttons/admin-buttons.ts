@@ -92,6 +92,12 @@ export async function handleAdminButton(
   if (id === AdminButtonIds.SETTINGS_TIERS) {
     return handleAdminTiersEntry(c, payload);
   }
+  if (id === AdminButtonIds.SETTINGS_HOUSE) {
+    return handleAdminAdsListEntry(c, payload, { kind: 'house' });
+  }
+  if (id === AdminButtonIds.SETTINGS_PLACEHOLDER) {
+    return handleAdminAdsListEntry(c, payload, { kind: 'placeholder' });
+  }
   const actionMapping = ACTION_BY_BUTTON[id];
   if (actionMapping) {
     return c.json({

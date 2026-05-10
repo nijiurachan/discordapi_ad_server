@@ -70,11 +70,12 @@ export async function handleAdminAdsListButton(
 export async function handleAdminAdsListEntry(
   c: Context<{ Bindings: Bindings }>,
   payload: MessageComponentInteractionPayload,
+  initialFilters: Partial<AdminListState> = {},
 ): Promise<Response> {
   if (!isAdmin(payload, c.env.ADMIN_ROLE_ID)) {
     return ephemeral(c, '⚠ この操作には管理者ロールが必要です。');
   }
-  const initial: AdminListState = { page: 1 };
+  const initial: AdminListState = { page: 1, ...initialFilters };
   return withPgClient(c.env.POSTGRES_URL, (client) =>
     runAdminAdsList(c, initial, client, InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE),
   );
