@@ -1,6 +1,8 @@
 import { withPgClient } from '../db/client.ts';
+import { createDiscordRest } from '../discord/rest.ts';
 import type { Bindings } from '../env.ts';
 import { createS3Client } from '../storage/s3.ts';
+import { sweepDmFallbackChannels } from './dm-fallback-sweep.ts';
 import { expireAds } from './expire-ads.ts';
 import { sweepExpiredDrafts } from './sweep-drafts.ts';
 
@@ -52,6 +54,14 @@ async function runHourly(env: Bindings): Promise<void> {
   await runSafely('expire-ads', async () => {
     const result = await withPgClient(env.POSTGRES_URL, (client) => expireAds(client));
     console.log('cron.hourly.expire-ads', result);
+  });
+
+  await runSafely('dm-fallback-sweep', async () => {
+    const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
+    const result = await withPgClient(env.POSTGRES_URL, (client) =>
+      sweepDmFallbackChannels(client, rest),
+    );
+    console.log('cron.hourly.dm-fallback-sweep', result);
   });
 }
 
