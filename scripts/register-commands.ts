@@ -89,6 +89,126 @@ const commands = [
     ],
   },
   {
+    name: 'admin',
+    description: '管理者向けコマンド',
+    type: 1,
+    default_member_permissions: '8', // ADMINISTRATOR
+    options: [
+      {
+        name: 'stats',
+        description: '全広告の統計（impression/click/CTR）を集計',
+        type: 1,
+        options: [
+          {
+            name: 'period',
+            description: '集計期間',
+            type: 3,
+            required: false,
+            choices: [
+              { name: '24h', value: '24h' },
+              { name: '7d', value: '7d' },
+              { name: '30d', value: '30d' },
+              { name: '90d', value: '90d' },
+              { name: 'all', value: 'all' },
+            ],
+          },
+          {
+            name: 'top_n',
+            description: '上位 N 件 (1-1000、規定: 50)',
+            type: 4,
+            required: false,
+            min_value: 1,
+            max_value: 1000,
+          },
+          {
+            name: 'csv',
+            description: 'CSV 出力（署名付き URL）',
+            type: 5,
+            required: false,
+          },
+        ],
+      },
+      {
+        name: 'replace-image',
+        description: '広告の画像を差し替える',
+        type: 1,
+        options: [
+          {
+            name: 'ad_id',
+            description: '対象広告 ID',
+            type: 3,
+            required: true,
+          },
+          {
+            name: 'image',
+            description: '新しいバナー画像',
+            type: 11,
+            required: true,
+          },
+        ],
+      },
+      {
+        name: 'submit',
+        description: '管理者として広告を投入（Tier/Fallback チェックをスキップ）',
+        type: 1, // SUB_COMMAND
+        options: [
+          {
+            name: 'kind',
+            description: '広告種別',
+            type: 3, // STRING
+            required: true,
+            choices: [
+              { name: 'regular', value: 'regular' },
+              { name: 'house', value: 'house' },
+              { name: 'placeholder', value: 'placeholder' },
+            ],
+          },
+          {
+            name: 'slot',
+            description: 'スロット',
+            type: 3,
+            required: true,
+            choices: [{ name: 'default', value: 'default' }],
+          },
+          {
+            name: 'image',
+            description: 'バナー画像',
+            type: 11, // ATTACHMENT
+            required: true,
+          },
+          {
+            name: 'weight',
+            description: '重み（1-1000、規定: kind依存）',
+            type: 4, // INTEGER
+            required: false,
+            min_value: 1,
+            max_value: 1000,
+          },
+          {
+            name: 'sponsor_id',
+            description: 'sponsor の Discord User ID（regular のみ）',
+            type: 3, // STRING
+            required: false,
+          },
+          {
+            name: 'auto_approve',
+            description: 'true なら status=approved で即時開始',
+            type: 5, // BOOLEAN
+            required: false,
+          },
+          {
+            name: 'ends_in_days',
+            description: '配信終了までの日数（1-365、未指定で無期限）',
+            type: 4,
+            required: false,
+            min_value: 1,
+            max_value: 365,
+          },
+        ],
+      },
+    ],
+  },
+  {
     name: 'ad-setup',
     description: '常設メニューを指定チャンネルに投稿',
     type: 1,

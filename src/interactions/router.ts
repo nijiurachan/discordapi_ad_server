@@ -7,6 +7,8 @@ import type {
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
+import { handleAdminAdsListButton } from './admin-ads-list.ts';
+import { handleAdminButton } from './buttons/admin-buttons.ts';
 import { handleAckButton } from './buttons/fallback-ack-button.ts';
 import { handleReviewApproveButton } from './buttons/review-approve-button.ts';
 import { handleReviewRejectButton } from './buttons/review-reject-button.ts';
@@ -16,6 +18,27 @@ import { handleAdSetup } from './commands/ad-setup.ts';
 import { handleAdStatsButton, handleAdStatsCommand } from './commands/ad-stats.ts';
 import { handleAdSubmit } from './commands/ad-submit.ts';
 import { handleAdWithdrawButton, handleAdWithdrawCommand } from './commands/ad-withdraw.ts';
+import { handleAdminReplaceImage } from './commands/admin-replace-image.ts';
+import { handleAdminStats } from './commands/admin-stats.ts';
+import { handleAdminSubmit } from './commands/admin-submit.ts';
+import { handleAdminActionModal } from './modals/admin-action-modal.ts';
+import {
+  ADMIN_EDIT_MODAL_PREFIX,
+  ADMIN_EDIT_OPEN_PREFIX,
+  ADMIN_EDIT_PICK_PREFIX,
+  handleAdminEditOpenButton,
+  handleAdminEditPickModal,
+  handleAdminEditSubmitModal,
+} from './modals/admin-edit-modal.ts';
+import {
+  ADMIN_RULES_MODAL_PREFIX,
+  handleAdminRulesSubmitModal,
+} from './modals/admin-rules-modal.ts';
+import { handleAdminSubmitModal } from './modals/admin-submit-modal.ts';
+import {
+  ADMIN_TIERS_MODAL_PREFIX,
+  handleAdminTiersSubmitModal,
+} from './modals/admin-tiers-modal.ts';
 import { handleRejectModal } from './modals/review-reject-modal.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
 import { ephemeral } from './responses.ts';
@@ -100,6 +123,20 @@ interactions.post('/', async (c) => {
       if (cmd.data?.name === 'ad-setup') {
         return handleAdSetup(c, cmd);
       }
+      if (cmd.data?.name === 'admin') {
+        const opts = cmd.data.options ?? [];
+        const sub = opts.find((o) => o.type === 1);
+        switch (sub?.name) {
+          case 'submit':
+            return handleAdminSubmit(c, cmd);
+          case 'replace-image':
+            return handleAdminReplaceImage(c, cmd);
+          case 'stats':
+            return handleAdminStats(c, cmd);
+          default:
+            return c.json({ error: 'unknown admin subcommand' }, 501);
+        }
+      }
       return c.json({ error: 'unknown command' }, 501);
     }
 
@@ -130,6 +167,15 @@ interactions.post('/', async (c) => {
       if (cid.startsWith('ack:')) {
         return handleAckButton(c, mc);
       }
+      if (cid.startsWith('adm:')) {
+        return handleAdminButton(c, mc);
+      }
+      if (cid.startsWith('adlist:')) {
+        return handleAdminAdsListButton(c, mc);
+      }
+      if (cid.startsWith(ADMIN_EDIT_OPEN_PREFIX)) {
+        return handleAdminEditOpenButton(c, mc);
+      }
       return c.json({ error: 'unknown component' }, 501);
     }
 
@@ -139,6 +185,24 @@ interactions.post('/', async (c) => {
       if (typeof modalCid === 'string') {
         if (modalCid.startsWith('submit:')) {
           return handleSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith('admin-submit:')) {
+          return handleAdminSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith('admin-action:')) {
+          return handleAdminActionModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_EDIT_PICK_PREFIX)) {
+          return handleAdminEditPickModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_EDIT_MODAL_PREFIX)) {
+          return handleAdminEditSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_RULES_MODAL_PREFIX)) {
+          return handleAdminRulesSubmitModal(c, modal);
+        }
+        if (modalCid.startsWith(ADMIN_TIERS_MODAL_PREFIX)) {
+          return handleAdminTiersSubmitModal(c, modal);
         }
         if (modalCid.startsWith('review-reject-modal:')) {
           return handleRejectModal(c, modal);

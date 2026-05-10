@@ -202,10 +202,26 @@ describe('runAdSetup', () => {
     expect(deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('kind=admin: ephemeral coming-soon stub', async () => {
-    const client = mockClient([]);
-    const createMessage = vi.fn(async () => ({ id: 'x', channel_id: 'y' }));
-    const deleteMessage = vi.fn(async () => undefined);
+  it('kind=admin: posts admin menu and persists message/channel ids', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [] }, // old admin message_id missing
+        { rows: [] }, // old admin channel_id missing
+        { rows: [] }, // upsert message_id
+        { rows: [] }, // upsert channel_id
+      ],
+      captured,
+    );
+    type MenuBody = {
+      embeds: Array<{ title: string }>;
+      components: Array<{ components: unknown[] }>;
+    };
+    const createMessage = vi.fn(async (_channelId: string, _body: MenuBody) => ({
+      id: 'admin-msg',
+      channel_id: 'chan-target',
+    }));
+    const deleteMessage = vi.fn(async (_channelId: string, _messageId: string) => undefined);
     const rest = { createMessage, deleteMessage } as unknown as DiscordRest;
 
     const res = await invoke(buildPayload({ kind: 'admin' }), {
@@ -213,11 +229,31 @@ describe('runAdSetup', () => {
       client,
       actorId: 'admin-1',
     });
-    const json = (await res.json()) as { type: number; data: { content: string } };
+    const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
     expect(json.type).toBe(4);
+    expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('admin');
-    expect(json.data.content).toContain('後続フェーズ');
-    expect(createMessage).not.toHaveBeenCalled();
+    expect(createMessage).toHaveBeenCalledTimes(1);
+    const menuBody = createMessage.mock.calls[0]?.[1];
+    expect(menuBody).toBeDefined();
+    if (!menuBody) throw new Error('createMessage should have been called');
+    expect(menuBody.embeds[0]?.title).toContain('広告管理コンソール');
+    const totalButtons = menuBody.components.reduce((acc, row) => acc + row.components.length, 0);
+    expect(totalButtons).toBe(16);
+
+    // The two trailing UPSERTs persist the new admin menu's message/channel ids.
+    const upsertCalls = captured.filter((c) => /INSERT INTO system_settings/.test(c.sql));
+    expect(upsertCalls).toHaveLength(2);
+    expect(upsertCalls[0]?.params).toEqual([
+      'menu.admin.message_id',
+      JSON.stringify('admin-msg'),
+      'admin-1',
+    ]);
+    expect(upsertCalls[1]?.params).toEqual([
+      'menu.admin.channel_id',
+      JSON.stringify('chan-target'),
+      'admin-1',
+    ]);
   });
 
   it('missing channel option: ephemeral validation error', async () => {

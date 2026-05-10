@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { type PgClient, withPgClient } from '../../db/client.ts';
 import { SystemSettingKey, getSystemSetting, setSystemSetting } from '../../db/settings.ts';
+import { buildAdminMenuMessage } from '../../discord/admin-menu.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type {
   ActionRowComponent,
@@ -79,11 +80,8 @@ export async function runAdSetup(
   }
   const kind = kindRaw as MenuKind;
 
-  if (kind !== 'submit') {
-    return ephemeral(
-      c,
-      `${kind} メニューは後続フェーズで対応します。現状は submit のみ実装済みです。`,
-    );
+  if (kind === 'review') {
+    return ephemeral(c, 'review メニューは後続フェーズで対応します。');
   }
 
   // Delete previous menu if it exists
@@ -101,7 +99,7 @@ export async function runAdSetup(
   }
 
   // Post new menu
-  const menu = buildSubmitMenu();
+  const menu = kind === 'admin' ? buildAdminMenuMessage() : buildSubmitMenu();
   const message = await deps.rest.createMessage(channelId, menu);
 
   // Persist new message_id + channel_id
