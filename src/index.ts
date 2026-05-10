@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { dispatchCron } from './cron/index.ts';
 import type { Bindings } from './env.ts';
 import { health } from './health.ts';
 import { interactions } from './interactions/router.ts';
@@ -14,12 +15,16 @@ app.get('/', (c) => c.text('discordapi_ad_server'));
 
 export default {
   fetch: app.fetch,
-  // P1: scheduled は空ハンドラ。P7 で実装
   scheduled: async (
-    _ev: ScheduledController,
-    _env: Bindings,
-    _ctx: ExecutionContext,
+    ev: ScheduledController,
+    env: Bindings,
+    ctx: ExecutionContext,
   ): Promise<void> => {
-    // intentionally empty for P1
+    try {
+      await dispatchCron(ev, env, ctx);
+    } catch (err) {
+      console.error('scheduled: dispatch failed', { cron: ev.cron, err });
+      throw err;
+    }
   },
 } satisfies ExportedHandler<Bindings>;

@@ -1,4 +1,5 @@
 import { HeadBucketCommand, type S3Client } from '@aws-sdk/client-s3';
+import { rotateDailySalt } from '../../cron/rotate-salt.ts';
 import type { PgClient } from '../../db/client.ts';
 import { writeAdminLog } from '../../db/queries/admin-logs.ts';
 import { SystemSettingKey, getSystemSetting, setSystemSetting } from '../../db/settings.ts';
@@ -44,22 +45,15 @@ export type RotateSaltResult = {
   newSaltLength: number;
 };
 
-function randomHex(bytes: number): string {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 export async function rotateSalt(client: PgClient, actorId: string): Promise<RotateSaltResult> {
-  const newSalt = randomHex(32);
-  await setSystemSetting(client, SystemSettingKey.IP_HASH_SALT, { salt: newSalt }, actorId);
+  const result = await rotateDailySalt(client, { actorId });
   await writeAdminLog(client, {
     actorId,
     action: 'rotate_salt',
     targetKind: 'system',
     targetId: SystemSettingKey.IP_HASH_SALT,
   });
-  return { newSaltLength: newSalt.length };
+  return { newSaltLength: result.newSaltLength };
 }
 
 export type HealthCheckResult = {
