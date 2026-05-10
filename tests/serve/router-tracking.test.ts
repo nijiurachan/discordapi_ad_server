@@ -30,6 +30,7 @@ const { queryMock, insertEventIfNotRecentMock, getDailySaltMock } = vi.hoisted((
 });
 
 vi.mock('../../src/db/client.ts', () => ({
+  resolveDbUrl: (env: { POSTGRES_URL?: string }) => env.POSTGRES_URL ?? 'postgres://test',
   withPgClient: vi.fn(async (_url: string, fn: (client: PgClient) => Promise<unknown>) => {
     return fn({
       query: queryMock,

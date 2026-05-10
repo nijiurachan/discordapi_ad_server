@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { withPgClient } from '../db/client.ts';
+import { resolveDbUrl, withPgClient } from '../db/client.ts';
 import { insertEventIfNotRecent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
 import { shouldRecordEvent } from '../utils/event-filter.ts';
@@ -35,7 +35,7 @@ serveRouter.get('/serve', async (c) => {
   const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
   const ipHash = await hashIP(ip, c.env.IP_HASH_SALT_BOOTSTRAP);
 
-  const ads = await withPgClient(c.env.POSTGRES_URL, (client) => serveAds(client, slot, n));
+  const ads = await withPgClient(resolveDbUrl(c.env), (client) => serveAds(client, slot, n));
   if (ads.length === 0) {
     return new Response(null, { status: 204 });
   }
@@ -94,7 +94,7 @@ export async function trackImpressions(
   if (trackable.length === 0) return;
 
   try {
-    await withPgClient(env.POSTGRES_URL, async (client) => {
+    await withPgClient(resolveDbUrl(env), async (client) => {
       const salt = await getDailySalt(client, env.IP_HASH_SALT_BOOTSTRAP);
       const ipHash = await hashIP(ip, salt);
       for (const ad of trackable) {

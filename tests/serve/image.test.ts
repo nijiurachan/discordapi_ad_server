@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 // route-level integration test. This avoids non-deterministic 500s caused by
 // the worker test env being unable to reach Postgres.
 vi.mock('../../src/db/client.ts', () => ({
+  resolveDbUrl: (env: { POSTGRES_URL?: string }) => env.POSTGRES_URL ?? 'postgres://test',
   withPgClient: vi.fn(async (_url: string, fn: (client: unknown) => Promise<unknown>) => {
     return fn({
       query: vi.fn(async () => ({ rows: [], rowCount: 0 })),

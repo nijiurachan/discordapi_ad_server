@@ -27,4 +27,9 @@ export type Bindings = {
   TEST_OVERRIDE_ALLOWED?: string;
   SERVE_RATE_LIMITER: RateLimitBinding;
   CLICK_RATE_LIMITER: RateLimitBinding;
+  // Optional Cloudflare Hyperdrive binding. When present (Workers Paid plan
+  // + provisioned Hyperdrive instance), `resolveDbUrl()` in src/db/client.ts
+  // prefers HYPERDRIVE.connectionString over POSTGRES_URL. Stays optional so
+  // local `wrangler dev` and unit tests can run without it.
+  HYPERDRIVE?: Hyperdrive;
 };

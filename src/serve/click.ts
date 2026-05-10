@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../db/client.ts';
 import { insertEventIfNotRecent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
 import { shouldRecordEvent } from '../utils/event-filter.ts';
@@ -33,7 +33,7 @@ export async function handleClick(c: Context<{ Bindings: Bindings }>): Promise<R
     return c.text('invalid ad id', 400);
   }
 
-  const result = await withPgClient(c.env.POSTGRES_URL, async (client) => {
+  const result = await withPgClient(resolveDbUrl(c.env), async (client) => {
     const ad = await getAdLinkUrl(client, adId);
     if (!ad) return null;
 
