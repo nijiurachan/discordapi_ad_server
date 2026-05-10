@@ -202,9 +202,9 @@ describe('runAdSetup', () => {
     expect(deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('kind=admin: ephemeral coming-soon stub', async () => {
+  it('kind=admin: posts admin menu and persists message/channel ids', async () => {
     const client = mockClient([]);
-    const createMessage = vi.fn(async () => ({ id: 'x', channel_id: 'y' }));
+    const createMessage = vi.fn(async () => ({ id: 'admin-msg', channel_id: 'chan-target' }));
     const deleteMessage = vi.fn(async () => undefined);
     const rest = { createMessage, deleteMessage } as unknown as DiscordRest;
 
@@ -213,11 +213,19 @@ describe('runAdSetup', () => {
       client,
       actorId: 'admin-1',
     });
-    const json = (await res.json()) as { type: number; data: { content: string } };
+    const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
     expect(json.type).toBe(4);
+    expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('admin');
-    expect(json.data.content).toContain('後続フェーズ');
-    expect(createMessage).not.toHaveBeenCalled();
+    expect(createMessage).toHaveBeenCalledTimes(1);
+    const [, body] = createMessage.mock.calls[0];
+    const menuBody = body as {
+      embeds: Array<{ title: string }>;
+      components: Array<{ components: unknown[] }>;
+    };
+    expect(menuBody.embeds[0].title).toContain('広告管理コンソール');
+    const totalButtons = menuBody.components.reduce((acc, row) => acc + row.components.length, 0);
+    expect(totalButtons).toBe(16);
   });
 
   it('missing channel option: ephemeral validation error', async () => {

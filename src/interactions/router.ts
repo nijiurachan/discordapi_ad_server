@@ -7,6 +7,7 @@ import type {
 import { InteractionResponseType, InteractionType } from '../discord/types.ts';
 import { verifyDiscordSignature } from '../discord/verify.ts';
 import type { Bindings } from '../env.ts';
+import { handleAdminButton } from './buttons/admin-buttons.ts';
 import { handleAckButton } from './buttons/fallback-ack-button.ts';
 import { handleReviewApproveButton } from './buttons/review-approve-button.ts';
 import { handleReviewRejectButton } from './buttons/review-reject-button.ts';
@@ -129,6 +130,9 @@ interactions.post('/', async (c) => {
       }
       if (cid.startsWith('ack:')) {
         return handleAckButton(c, mc);
+      }
+      if (cid.startsWith('adm:')) {
+        return handleAdminButton(c, mc);
       }
       return c.json({ error: 'unknown component' }, 501);
     }

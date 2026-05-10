@@ -63,6 +63,10 @@ export const InteractionResponseType = {
   MODAL: 9,
 } as const;
 
+export const MessageFlags = {
+  EPHEMERAL: 1 << 6, // 64
+} as const;
+
 export type InteractionType = (typeof InteractionType)[keyof typeof InteractionType];
 export type InteractionResponseType =
   (typeof InteractionResponseType)[keyof typeof InteractionResponseType];
