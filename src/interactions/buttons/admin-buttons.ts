@@ -10,6 +10,7 @@ import type { Bindings } from '../../env.ts';
 import { handleAdminAdsListEntry } from '../admin-ads-list.ts';
 import { ADMIN_ACTION_MODAL_PREFIX } from '../modals/admin-action-modal.ts';
 import { handleAdminRulesEntry } from '../modals/admin-rules-modal.ts';
+import { handleAdminTiersEntry } from '../modals/admin-tiers-modal.ts';
 import { ephemeral } from '../responses.ts';
 
 const KNOWN_BUTTON_IDS = new Set<string>(Object.values(AdminButtonIds));
@@ -87,6 +88,9 @@ export async function handleAdminButton(
   }
   if (id === AdminButtonIds.SETTINGS_RULES) {
     return handleAdminRulesEntry(c, payload);
+  }
+  if (id === AdminButtonIds.SETTINGS_TIERS) {
+    return handleAdminTiersEntry(c, payload);
   }
   const actionMapping = ACTION_BY_BUTTON[id];
   if (actionMapping) {
