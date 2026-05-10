@@ -24,6 +24,27 @@ const POOL_MAX = 5;
  */
 const POOLS = new Map<string, pg.Pool>();
 
+/**
+ * Strip credentials from a connection string before logging. Returns the
+ * safe identifying fields (protocol/host/port/db/user) — never password.
+ * Falls back to `{ unparseable: true }` so we still get *some* signal in
+ * logs without the parser throwing inside an error handler.
+ */
+function safeDbUrlInfo(url: string): Record<string, string | boolean> {
+  try {
+    const u = new URL(url);
+    return {
+      protocol: u.protocol.replace(/:$/, ''),
+      host: u.hostname,
+      port: u.port || '(default)',
+      database: u.pathname.replace(/^\//, '') || '(none)',
+      user: u.username || '(none)',
+    };
+  } catch {
+    return { unparseable: true };
+  }
+}
+
 function getOrCreatePool(url: string, opts: CreatePgClientOptions): pg.Pool {
   const cached = POOLS.get(url);
   if (cached) return cached;
@@ -38,9 +59,10 @@ function getOrCreatePool(url: string, opts: CreatePgClientOptions): pg.Pool {
   // EventEmitter crashes Node — log instead and let the pool's own
   // reconnect logic recover. We deliberately don't evict the pool here:
   // aggressive teardown could race with in-flight queries and the next
-  // borrow will exercise reconnect anyway.
+  // borrow will exercise reconnect anyway. The DSN is redacted because
+  // connection strings carry the DB password.
   pool.on('error', (err) => {
-    console.error('pg pool: background client error', { url, err });
+    console.error('pg pool: background client error', { db: safeDbUrlInfo(url), err });
   });
   POOLS.set(url, pool);
   return pool;
