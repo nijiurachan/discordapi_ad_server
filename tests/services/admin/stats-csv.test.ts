@@ -37,8 +37,8 @@ describe('rowsToCsv', () => {
     expect(dataLine.startsWith('ad-1,,regular,')).toBe(true);
   });
 
-  it('neutralizes CSV-injection payloads in title (=, +, -, @ leading chars)', () => {
-    const triggers = ['=SUM(1,2)', '+1+1', '-2+3', '@cmd'];
+  it('neutralizes CSV-injection payloads in title (=, +, -, @, \\t, \\r leading chars)', () => {
+    const triggers = ['=SUM(1,2)', '+1+1', '-2+3', '@cmd', '\tcmd', '\rcmd'];
     for (const title of triggers) {
       const csv = rowsToCsv([{ ...baseRow, title }]);
       const dataLine = csv.split('\n').at(-1) ?? '';
