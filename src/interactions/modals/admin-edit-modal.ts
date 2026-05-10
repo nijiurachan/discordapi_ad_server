@@ -151,16 +151,37 @@ export async function handleAdminEditSubmitModal(
     const l = validateLinkUrl(rules, linkUrl);
     if (!l.ok) return ephemeral(c, l.error);
 
-    const ok = await updateAdContent(client, adId, { title, body, linkUrl });
-    if (!ok) return ephemeral(c, '広告の更新に失敗しました。');
-    await writeAdminLog(client, {
-      actorId,
-      action: 'edit_ad',
-      targetKind: 'ad',
-      targetId: adId,
-      before: { title: before.title, body: before.body, link_url: before.linkUrl },
-      after: { title, body, link_url: linkUrl },
-    });
+    let txOpen = false;
+    try {
+      await client.query('BEGIN');
+      txOpen = true;
+      const ok = await updateAdContent(client, adId, { title, body, linkUrl });
+      if (!ok) {
+        await client.query('ROLLBACK');
+        txOpen = false;
+        return ephemeral(c, '広告の更新に失敗しました。');
+      }
+      await writeAdminLog(client, {
+        actorId,
+        action: 'edit_ad',
+        targetKind: 'ad',
+        targetId: adId,
+        before: { title: before.title, body: before.body, link_url: before.linkUrl },
+        after: { title, body, link_url: linkUrl },
+      });
+      await client.query('COMMIT');
+      txOpen = false;
+    } catch (err) {
+      console.error('admin-edit-modal: tx failed', err);
+      if (txOpen) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rbErr) {
+          console.error('admin-edit-modal: rollback failed', rbErr);
+        }
+      }
+      return ephemeral(c, '広告の更新に失敗しました。');
+    }
     return ephemeral(c, `✅ 広告 \`${adId}\` を更新しました。`);
   });
 }

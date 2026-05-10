@@ -86,14 +86,15 @@ describe('upsertTier', () => {
 
 describe('deleteTier', () => {
   it('refuses to delete when sponsors reference the tier', async () => {
-    const client = mockClient([{ rows: [{ count: '3' }] }]);
+    // Atomic DELETE ... WHERE NOT EXISTS returns 0 rows when guard fires.
+    const client = mockClient([{ rows: [] }]);
     const result = await deleteTier(client, 1);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('sponsor_referenced');
   });
 
   it('deletes when no references exist', async () => {
-    const client = mockClient([{ rows: [{ count: '0' }] }, { rowCount: 1 }]);
+    const client = mockClient([{ rows: [{ id: 1 }] }]);
     const result = await deleteTier(client, 1);
     expect(result.ok).toBe(true);
   });

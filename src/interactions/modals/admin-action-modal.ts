@@ -38,7 +38,7 @@ export async function handleAdminActionModal(
     return ephemeral(c, '不正な custom_id です');
   }
   const action = customId.slice(ADMIN_ACTION_MODAL_PREFIX.length);
-  if (!(action in ACTION_LABELS)) {
+  if (!Object.hasOwn(ACTION_LABELS, action)) {
     return ephemeral(c, '未対応のアクションです');
   }
   const adId = findAdId(payload);
@@ -51,7 +51,9 @@ export async function handleAdminActionModal(
   const result = await withPgClient(c.env.POSTGRES_URL, async (client) => {
     if (action === 'pause') return pauseAd(client, actorId, adId);
     if (action === 'resume') return resumeAd(client, actorId, adId);
-    return forceEndAdAction(client, actorId, adId, { rest });
+    if (action === 'force-end') return forceEndAdAction(client, actorId, adId, { rest });
+    // Unreachable: hasOwn guard above already rejected unknown actions.
+    return { ok: false as const, reason: 'invalid_status' as const };
   });
 
   if (!result.ok) {

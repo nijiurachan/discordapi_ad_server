@@ -69,13 +69,13 @@ export async function upsertTier(
 }
 
 export async function deleteTier(client: PgClient, tierId: number): Promise<TierMutationError> {
-  const refRes = await client.query<{ count: string }>(
-    'SELECT COUNT(*)::text AS count FROM sponsors WHERE current_tier_id = $1',
+  const res = await client.query<{ id: number }>(
+    `DELETE FROM tiers
+       WHERE id = $1
+         AND NOT EXISTS (SELECT 1 FROM sponsors WHERE current_tier_id = $1)
+     RETURNING id`,
     [tierId],
   );
-  if (Number(refRes.rows[0]?.count ?? '0') > 0) {
-    return { ok: false, reason: 'sponsor_referenced' };
-  }
-  await client.query('DELETE FROM tiers WHERE id = $1', [tierId]);
+  if (res.rows.length === 0) return { ok: false, reason: 'sponsor_referenced' };
   return { ok: true };
 }

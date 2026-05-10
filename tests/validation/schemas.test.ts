@@ -47,4 +47,22 @@ describe('parseAdFormatRules', () => {
     const result = parseAdFormatRules({ ...valid, allowedExtensions: [] });
     expect(result.ok).toBe(false);
   });
+
+  it('rejects aspectRatios with a zero component (e.g. "16:0")', () => {
+    const result = parseAdFormatRules({ ...valid, aspectRatios: ['16:0'] });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('\n')).toContain('aspectRatios');
+  });
+
+  it('rejects when minWidth > maxWidth', () => {
+    const result = parseAdFormatRules({ ...valid, minWidth: 500, maxWidth: 100 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('\n')).toContain('minWidth');
+  });
+
+  it('rejects when minHeight > maxHeight', () => {
+    const result = parseAdFormatRules({ ...valid, minHeight: 800, maxHeight: 200 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join('\n')).toContain('minHeight');
+  });
 });

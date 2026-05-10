@@ -36,4 +36,18 @@ describe('rowsToCsv', () => {
     // ad-1,,regular,...  ← second column empty
     expect(dataLine.startsWith('ad-1,,regular,')).toBe(true);
   });
+
+  it('neutralizes CSV-injection payloads in title (=, +, -, @ leading chars)', () => {
+    const triggers = ['=SUM(1,2)', '+1+1', '-2+3', '@cmd'];
+    for (const title of triggers) {
+      const csv = rowsToCsv([{ ...baseRow, title }]);
+      const dataLine = csv.split('\n').at(-1) ?? '';
+      // The raw formula must NOT appear at the start of its column. Either it
+      // is wrapped in quotes ("'=SUM(1,2)") or at minimum prefixed with a single
+      // quote so spreadsheet apps don't evaluate it.
+      const rawAtColumnStart = dataLine.includes(`,${title},`);
+      expect(rawAtColumnStart).toBe(false);
+      expect(csv).toContain(`'${title}`);
+    }
+  });
 });

@@ -54,7 +54,7 @@ export async function updateAdImage(
     imageKey: before.rows[0]?.image_key ?? null,
     imageMime: before.rows[0]?.image_mime ?? null,
   };
-  await client.query(
+  const upd = await client.query(
     `UPDATE ads
         SET image_key = $1,
             image_mime = $2,
@@ -71,5 +71,6 @@ export async function updateAdImage(
       adId,
     ],
   );
+  if ((upd.rowCount ?? 0) === 0) return null;
   return { previous };
 }

@@ -77,4 +77,16 @@ describe('runHealthCheck', () => {
     expect(result.db).toBe('unavailable');
     expect(result.s3).toBe('ok');
   });
+
+  it('reports degraded when s3 probe throws (db still ok)', async () => {
+    const client = mockClient([{ rowCount: 1 }]);
+    const s3 = {
+      send: vi.fn(async () => {
+        throw new Error('s3 down');
+      }),
+    } as unknown as S3Client;
+    const result = await runHealthCheck(client, s3, 'bucket');
+    expect(result.db).toBe('ok');
+    expect(result.s3).toBe('unavailable');
+  });
 });

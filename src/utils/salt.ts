@@ -1,7 +1,5 @@
 import type { PgClient } from '../db/client.ts';
-import { getSystemSetting } from '../db/settings.ts';
-
-const SALT_KEY = 'ip_hash_salt';
+import { SystemSettingKey, getSystemSetting } from '../db/settings.ts';
 
 type SaltValue = { salt: string };
 
@@ -14,7 +12,7 @@ type SaltValue = { salt: string };
  * Caller is expected to treat any thrown DB error as a fatal failure.
  */
 export async function getDailySalt(client: PgClient, fallback: string): Promise<string> {
-  const value = await getSystemSetting<SaltValue>(client, SALT_KEY);
+  const value = await getSystemSetting<SaltValue>(client, SystemSettingKey.IP_HASH_SALT);
   if (!value) return fallback;
   if (typeof value.salt !== 'string' || value.salt.trim().length === 0) {
     // corrupted / unexpected shape (missing or whitespace-only) — fall back to

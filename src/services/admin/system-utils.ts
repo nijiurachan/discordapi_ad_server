@@ -52,12 +52,12 @@ function randomHex(bytes: number): string {
 
 export async function rotateSalt(client: PgClient, actorId: string): Promise<RotateSaltResult> {
   const newSalt = randomHex(32);
-  await setSystemSetting(client, 'ip_hash_salt', { salt: newSalt }, actorId);
+  await setSystemSetting(client, SystemSettingKey.IP_HASH_SALT, { salt: newSalt }, actorId);
   await writeAdminLog(client, {
     actorId,
     action: 'rotate_salt',
     targetKind: 'system',
-    targetId: 'ip_hash_salt',
+    targetId: SystemSettingKey.IP_HASH_SALT,
   });
   return { newSaltLength: newSalt.length };
 }

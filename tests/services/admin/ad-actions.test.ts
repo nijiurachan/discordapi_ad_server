@@ -129,4 +129,12 @@ describe('forceEndAdAction', () => {
     expect(result.ok).toBe(true);
     expect(rest.createDmChannel).not.toHaveBeenCalled();
   });
+
+  it('returns reason="race" when the optimistic UPDATE affects 0 rows', async () => {
+    // SELECT returns the ad as approved, but UPDATE finds it already moved.
+    const client = mockClient([{ rows: [adRow()] }, { rowCount: 0 }], []);
+    const result = await forceEndAdAction(client, 'admin-1', 'ad-1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('race');
+  });
 });

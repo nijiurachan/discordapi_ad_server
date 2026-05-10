@@ -203,7 +203,16 @@ describe('runAdSetup', () => {
   });
 
   it('kind=admin: posts admin menu and persists message/channel ids', async () => {
-    const client = mockClient([]);
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [] }, // old admin message_id missing
+        { rows: [] }, // old admin channel_id missing
+        { rows: [] }, // upsert message_id
+        { rows: [] }, // upsert channel_id
+      ],
+      captured,
+    );
     type MenuBody = {
       embeds: Array<{ title: string }>;
       components: Array<{ components: unknown[] }>;
@@ -231,6 +240,20 @@ describe('runAdSetup', () => {
     expect(menuBody.embeds[0]?.title).toContain('広告管理コンソール');
     const totalButtons = menuBody.components.reduce((acc, row) => acc + row.components.length, 0);
     expect(totalButtons).toBe(16);
+
+    // The two trailing UPSERTs persist the new admin menu's message/channel ids.
+    const upsertCalls = captured.filter((c) => /INSERT INTO system_settings/.test(c.sql));
+    expect(upsertCalls).toHaveLength(2);
+    expect(upsertCalls[0]?.params).toEqual([
+      'menu.admin.message_id',
+      JSON.stringify('admin-msg'),
+      'admin-1',
+    ]);
+    expect(upsertCalls[1]?.params).toEqual([
+      'menu.admin.channel_id',
+      JSON.stringify('chan-target'),
+      'admin-1',
+    ]);
   });
 
   it('missing channel option: ephemeral validation error', async () => {
