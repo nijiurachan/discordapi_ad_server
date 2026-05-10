@@ -95,6 +95,40 @@ const commands = [
     default_member_permissions: '8', // ADMINISTRATOR
     options: [
       {
+        name: 'stats',
+        description: '全広告の統計（impression/click/CTR）を集計',
+        type: 1,
+        options: [
+          {
+            name: 'period',
+            description: '集計期間',
+            type: 3,
+            required: false,
+            choices: [
+              { name: '24h', value: '24h' },
+              { name: '7d', value: '7d' },
+              { name: '30d', value: '30d' },
+              { name: '90d', value: '90d' },
+              { name: 'all', value: 'all' },
+            ],
+          },
+          {
+            name: 'top_n',
+            description: '上位 N 件 (1-1000、規定: 50)',
+            type: 4,
+            required: false,
+            min_value: 1,
+            max_value: 1000,
+          },
+          {
+            name: 'csv',
+            description: 'CSV 出力（署名付き URL）',
+            type: 5,
+            required: false,
+          },
+        ],
+      },
+      {
         name: 'replace-image',
         description: '広告の画像を差し替える',
         type: 1,

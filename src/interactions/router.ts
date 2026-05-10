@@ -19,6 +19,7 @@ import { handleAdStatsButton, handleAdStatsCommand } from './commands/ad-stats.t
 import { handleAdSubmit } from './commands/ad-submit.ts';
 import { handleAdWithdrawButton, handleAdWithdrawCommand } from './commands/ad-withdraw.ts';
 import { handleAdminReplaceImage } from './commands/admin-replace-image.ts';
+import { handleAdminStats } from './commands/admin-stats.ts';
 import { handleAdminSubmit } from './commands/admin-submit.ts';
 import { handleAdminActionModal } from './modals/admin-action-modal.ts';
 import {
@@ -130,6 +131,8 @@ interactions.post('/', async (c) => {
             return handleAdminSubmit(c, cmd);
           case 'replace-image':
             return handleAdminReplaceImage(c, cmd);
+          case 'stats':
+            return handleAdminStats(c, cmd);
           default:
             return c.json({ error: 'unknown admin subcommand' }, 501);
         }
