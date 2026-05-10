@@ -170,10 +170,10 @@ describe('getAggregateStats', () => {
     );
     const res = await getAggregateStats(client, 'user-1', '24h');
     expect(res).toEqual({ impressions: 100, clicks: 10, ctr: 0.1, adCount: 3 });
-    expect(captured[0]?.sql).toContain('ad_stats_daily');
-    expect(captured[0]?.sql).toContain('COALESCE(SUM(s.impressions), 0)');
-    expect(captured[0]?.sql).toContain('COALESCE(SUM(s.clicks), 0)');
-    expect(captured[0]?.sql).toContain("s.day >= now() - interval '24 hours'");
+    expect(captured[0]?.sql).toContain('ad_events');
+    expect(captured[0]?.sql).toContain("COUNT(*) FILTER (WHERE e.event_type = 'impression')");
+    expect(captured[0]?.sql).toContain("COUNT(*) FILTER (WHERE e.event_type = 'click')");
+    expect(captured[0]?.sql).toContain("e.ts >= now() - interval '24 hours'");
     expect(captured[0]?.params).toEqual(['user-1']);
   });
 
@@ -184,8 +184,8 @@ describe('getAggregateStats', () => {
       captured,
     );
     await getAggregateStats(client, 'user-1', '7d');
-    expect(captured[0]?.sql).toContain('ad_stats_daily');
-    expect(captured[0]?.sql).toContain("s.day >= now() - interval '7 days'");
+    expect(captured[0]?.sql).toContain('ad_events');
+    expect(captured[0]?.sql).toContain("e.ts >= now() - interval '7 days'");
   });
 
   it("includes 30d interval clause for period='30d'", async () => {
@@ -195,8 +195,8 @@ describe('getAggregateStats', () => {
       captured,
     );
     await getAggregateStats(client, 'user-1', '30d');
-    expect(captured[0]?.sql).toContain('ad_stats_daily');
-    expect(captured[0]?.sql).toContain("s.day >= now() - interval '30 days'");
+    expect(captured[0]?.sql).toContain('ad_events');
+    expect(captured[0]?.sql).toContain("e.ts >= now() - interval '30 days'");
   });
 
   it("omits day condition for period='all'", async () => {
@@ -206,9 +206,9 @@ describe('getAggregateStats', () => {
       captured,
     );
     await getAggregateStats(client, 'user-1', 'all');
-    expect(captured[0]?.sql).toContain('ad_stats_daily');
+    expect(captured[0]?.sql).toContain('ad_events');
     expect(captured[0]?.sql).not.toContain('interval');
-    expect(captured[0]?.sql).not.toContain('s.day >=');
+    expect(captured[0]?.sql).not.toContain('e.ts >=');
   });
 
   it('returns ctr=0 when impressions=0 (no divide-by-zero)', async () => {

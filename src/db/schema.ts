@@ -148,6 +148,7 @@ export const adEvents = pgTable(
     typeCheck: check('ad_events_type_check', sql`${t.eventType} IN ('impression','click')`),
     adIdTsIdx: index('ad_events_ad_id_ts_idx').using('btree', t.adId, t.ts),
     tsIdx: index('ad_events_ts_idx').using('brin', t.ts),
+    dedupIdx: index('idx_ad_events_dedup').using('btree', t.adId, t.ipHash, t.eventType, t.ts),
   }),
 );
 

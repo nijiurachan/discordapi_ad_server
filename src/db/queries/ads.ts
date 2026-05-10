@@ -138,6 +138,16 @@ const PERIOD_INTERVAL: Record<StatsPeriod, string | null> = {
   all: null,
 };
 
+/**
+ * Aggregates impressions/clicks/CTR for a sponsor over a rolling time window.
+ *
+ * Note: queries `ad_events` directly (not the daily-bucketed `ad_stats_daily`
+ * view) because the `24h` / `7d` / `30d` periods are rolling windows from
+ * `now()`, and the view's `date_trunc('day', ts)` would round to whole-day
+ * buckets — losing intra-day events near the boundary.
+ *
+ * The view remains useful for genuine daily reports (admin dashboards in P6).
+ */
 export async function getAggregateStats(
   client: PgClient,
   sponsorId: string,
@@ -146,18 +156,18 @@ export async function getAggregateStats(
   const interval = PERIOD_INTERVAL[period];
   // The interval string is hardcoded against a known finite set above; it is
   // never user input, so inlining it into the SQL is safe.
-  const dayCondition = interval ? `AND s.day >= now() - interval '${interval}'` : '';
+  const tsCondition = interval ? `AND e.ts >= now() - interval '${interval}'` : '';
   const res = await client.query<{
     impressions: string;
     clicks: string;
     ad_count: string;
   }>(
     `SELECT
-       COALESCE(SUM(s.impressions), 0)::text AS impressions,
-       COALESCE(SUM(s.clicks), 0)::text       AS clicks,
-       COUNT(DISTINCT a.id)::text             AS ad_count
+       COUNT(*) FILTER (WHERE e.event_type = 'impression')::text AS impressions,
+       COUNT(*) FILTER (WHERE e.event_type = 'click')::text       AS clicks,
+       COUNT(DISTINCT a.id)::text                                  AS ad_count
      FROM ads a
-     LEFT JOIN ad_stats_daily s ON s.ad_id = a.id ${dayCondition}
+     LEFT JOIN ad_events e ON e.ad_id = a.id ${tsCondition}
      WHERE a.sponsor_id = $1
        AND a.kind <> 'placeholder'`,
     [sponsorId],

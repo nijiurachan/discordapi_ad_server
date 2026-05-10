@@ -44,4 +44,16 @@ describe('getDailySalt', () => {
     const out = await getDailySalt(client, 'bootstrap-salt');
     expect(out).toBe('bootstrap-salt');
   });
+
+  it('returns fallback when salt is whitespace-only (spaces)', async () => {
+    const client = mockClient([{ rows: [{ value: { salt: '   ' } }] }]);
+    const out = await getDailySalt(client, 'fallback-x');
+    expect(out).toBe('fallback-x');
+  });
+
+  it('returns fallback when salt is tab/newline-only', async () => {
+    const client = mockClient([{ rows: [{ value: { salt: '\t\n' } }] }]);
+    const out = await getDailySalt(client, 'fallback-x');
+    expect(out).toBe('fallback-x');
+  });
 });

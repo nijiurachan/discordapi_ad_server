@@ -1,25 +1,16 @@
 import type { Context } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../src/db/client.ts';
+import type { InsertEventResult } from '../../src/db/queries/ad-events.ts';
 import type { Bindings } from '../../src/env.ts';
 
 // vi.hoisted is required because vi.mock calls are hoisted above all imports.
 // We need the mock fns to be initialized before vi.mock factories run.
-const { queryMock, isRecentEventMock, insertAdEventMock, getDailySaltMock } = vi.hoisted(() => {
+const { queryMock, insertEventIfNotRecentMock, getDailySaltMock } = vi.hoisted(() => {
   return {
     queryMock:
       vi.fn<(sql: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount?: number }>>(),
-    isRecentEventMock:
-      vi.fn<
-        (
-          client: PgClient,
-          adId: string,
-          ipHash: string,
-          eventType: 'impression' | 'click',
-          windowMs?: number,
-        ) => Promise<boolean>
-      >(),
-    insertAdEventMock:
+    insertEventIfNotRecentMock:
       vi.fn<
         (
           client: PgClient,
@@ -30,7 +21,8 @@ const { queryMock, isRecentEventMock, insertAdEventMock, getDailySaltMock } = vi
             ua: string | null;
             slot: string | null;
           },
-        ) => Promise<void>
+          windowMs?: number,
+        ) => Promise<InsertEventResult>
       >(),
     getDailySaltMock: vi.fn<(client: PgClient, fallback: string) => Promise<string>>(),
   };
@@ -46,8 +38,7 @@ vi.mock('../../src/db/client.ts', () => ({
 }));
 
 vi.mock('../../src/db/queries/ad-events.ts', () => ({
-  isRecentEvent: isRecentEventMock,
-  insertAdEvent: insertAdEventMock,
+  insertEventIfNotRecent: insertEventIfNotRecentMock,
 }));
 
 vi.mock('../../src/utils/salt.ts', () => ({
@@ -75,8 +66,8 @@ function makeCtx(opts: MockCtxOpts = {}): {
   const headers = opts.headers ?? {};
 
   // First DB call inside handleClick is getAdLinkUrl. We set its row response
-  // here. Subsequent calls (isRecentEvent / insertAdEvent) are intercepted by
-  // the mocks above and never hit queryMock.
+  // here. Subsequent calls (insertEventIfNotRecent) are intercepted by the
+  // mocks above and never hit queryMock.
   if (opts.adRow === null) {
     queryMock.mockResolvedValueOnce({ rows: [] });
   } else if (opts.adRow !== undefined) {
@@ -113,10 +104,8 @@ function makeCtx(opts: MockCtxOpts = {}): {
 describe('handleClick tracking', () => {
   beforeEach(() => {
     queryMock.mockReset();
-    isRecentEventMock.mockReset();
-    isRecentEventMock.mockResolvedValue(false);
-    insertAdEventMock.mockReset();
-    insertAdEventMock.mockResolvedValue(undefined);
+    insertEventIfNotRecentMock.mockReset();
+    insertEventIfNotRecentMock.mockResolvedValue({ ok: true, insertedId: 1n });
     getDailySaltMock.mockReset();
     getDailySaltMock.mockResolvedValue('test-salt');
   });
@@ -130,7 +119,7 @@ describe('handleClick tracking', () => {
     const res = await handleClick(ctx);
     expect(res.status).toBe(400);
     expect(textMock).toHaveBeenCalledWith('invalid ad id', 400);
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 
   it('404 when ad not found (no tracking)', async () => {
@@ -138,23 +127,35 @@ describe('handleClick tracking', () => {
     const res = await handleClick(ctx);
     expect(res.status).toBe(404);
     expect(textMock).toHaveBeenCalledWith('not found', 404);
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 
-  it('records click for normal GET on regular ad and 302s', async () => {
+  it('records click for normal GET on regular ad and 302s (with hashed IP)', async () => {
     const { ctx, redirectMock } = makeCtx({
       headers: { 'user-agent': 'Mozilla/5.0', 'cf-connecting-ip': '1.2.3.4' },
     });
     const res = await handleClick(ctx);
     expect(res.status).toBe(302);
     expect(redirectMock).toHaveBeenCalledWith('https://example.com/landing', 302);
-    expect(insertAdEventMock).toHaveBeenCalledTimes(1);
-    expect(insertAdEventMock.mock.calls[0]?.[1]).toMatchObject({
-      adId: VALID_AD_ID,
-      eventType: 'click',
-      ua: 'Mozilla/5.0',
-      slot: null,
-    });
+
+    // Dedup helper invoked exactly once with the click payload.
+    expect(getDailySaltMock).toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).toHaveBeenCalledTimes(1);
+    expect(insertEventIfNotRecentMock).toHaveBeenCalledWith(
+      expect.anything(), // client
+      expect.objectContaining({
+        adId: VALID_AD_ID,
+        eventType: 'click',
+        ua: 'Mozilla/5.0',
+        slot: null,
+      }),
+    );
+
+    // The persisted ipHash MUST NOT equal the raw IP — it must be the hex hash.
+    const callArgs = insertEventIfNotRecentMock.mock.calls[0]?.[1];
+    expect(callArgs?.ipHash).toBeDefined();
+    expect(callArgs?.ipHash).not.toBe('1.2.3.4');
+    expect(callArgs?.ipHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('skips tracking for placeholder ad but still 302s', async () => {
@@ -165,8 +166,8 @@ describe('handleClick tracking', () => {
     const res = await handleClick(ctx);
     expect(res.status).toBe(302);
     expect(redirectMock).toHaveBeenCalledWith('https://example.com/p', 302);
-    expect(insertAdEventMock).not.toHaveBeenCalled();
-    expect(isRecentEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
+    expect(getDailySaltMock).not.toHaveBeenCalled();
   });
 
   it('skips tracking on HEAD method', async () => {
@@ -174,7 +175,7 @@ describe('handleClick tracking', () => {
     const res = await handleClick(ctx);
     expect(res.status).toBe(302);
     expect(redirectMock).toHaveBeenCalled();
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 
   it('skips tracking for bot UA', async () => {
@@ -184,23 +185,22 @@ describe('handleClick tracking', () => {
     const res = await handleClick(ctx);
     expect(res.status).toBe(302);
     expect(redirectMock).toHaveBeenCalled();
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 
-  it('skips INSERT when dedup hits but still 302s', async () => {
-    isRecentEventMock.mockResolvedValueOnce(true);
+  it('still 302s when dedup helper reports duplicate (no extra DB writes)', async () => {
+    insertEventIfNotRecentMock.mockResolvedValueOnce({ ok: false, reason: 'duplicate' });
     const { ctx, redirectMock } = makeCtx({
       headers: { 'user-agent': 'Mozilla/5.0' },
     });
     const res = await handleClick(ctx);
     expect(res.status).toBe(302);
     expect(redirectMock).toHaveBeenCalled();
-    expect(isRecentEventMock).toHaveBeenCalledTimes(1);
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).toHaveBeenCalledTimes(1);
   });
 
   it('redirects normally even when tracking insert throws', async () => {
-    insertAdEventMock.mockRejectedValueOnce(new Error('db boom'));
+    insertEventIfNotRecentMock.mockRejectedValueOnce(new Error('db boom'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { ctx, redirectMock } = makeCtx({
       headers: { 'user-agent': 'Mozilla/5.0' },
@@ -220,6 +220,6 @@ describe('handleClick tracking', () => {
     const res = await handleClick(ctx);
     expect(res.status).toBe(302);
     expect(redirectMock).toHaveBeenCalledWith('https://example.com/h', 302);
-    expect(insertAdEventMock).toHaveBeenCalledTimes(1);
+    expect(insertEventIfNotRecentMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -16,8 +16,10 @@ type SaltValue = { salt: string };
 export async function getDailySalt(client: PgClient, fallback: string): Promise<string> {
   const value = await getSystemSetting<SaltValue>(client, SALT_KEY);
   if (!value) return fallback;
-  if (typeof value.salt !== 'string' || value.salt.length === 0) {
-    // corrupted / unexpected shape — fall back to bootstrap rather than crashing
+  if (typeof value.salt !== 'string' || value.salt.trim().length === 0) {
+    // corrupted / unexpected shape (missing or whitespace-only) — fall back to
+    // bootstrap rather than crashing. The original (untrimmed) value is
+    // preserved for hashing so the input matches what was stored.
     return fallback;
   }
   return value.salt;

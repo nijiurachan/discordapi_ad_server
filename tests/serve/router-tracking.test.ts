@@ -1,25 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PgClient } from '../../src/db/client.ts';
+import type { InsertEventResult } from '../../src/db/queries/ad-events.ts';
 import type { Bindings } from '../../src/env.ts';
 import type { ServedAd } from '../../src/serve/pick.ts';
 
 // vi.hoisted is required because vi.mock calls are hoisted above all imports.
 // We need the mock fns to be initialized before vi.mock factories run.
-const { queryMock, isRecentEventMock, insertAdEventMock, getDailySaltMock } = vi.hoisted(() => {
+const { queryMock, insertEventIfNotRecentMock, getDailySaltMock } = vi.hoisted(() => {
   return {
     queryMock:
       vi.fn<(sql: string, params?: unknown[]) => Promise<{ rows: unknown[]; rowCount?: number }>>(),
-    isRecentEventMock:
-      vi.fn<
-        (
-          client: PgClient,
-          adId: string,
-          ipHash: string,
-          eventType: 'impression' | 'click',
-          windowMs?: number,
-        ) => Promise<boolean>
-      >(),
-    insertAdEventMock:
+    insertEventIfNotRecentMock:
       vi.fn<
         (
           client: PgClient,
@@ -30,7 +21,8 @@ const { queryMock, isRecentEventMock, insertAdEventMock, getDailySaltMock } = vi
             ua: string | null;
             slot: string | null;
           },
-        ) => Promise<void>
+          windowMs?: number,
+        ) => Promise<InsertEventResult>
       >(),
     getDailySaltMock: vi.fn<(client: PgClient, fallback: string) => Promise<string>>(),
   };
@@ -46,8 +38,7 @@ vi.mock('../../src/db/client.ts', () => ({
 }));
 
 vi.mock('../../src/db/queries/ad-events.ts', () => ({
-  isRecentEvent: isRecentEventMock,
-  insertAdEvent: insertAdEventMock,
+  insertEventIfNotRecent: insertEventIfNotRecentMock,
 }));
 
 vi.mock('../../src/utils/salt.ts', () => ({
@@ -78,10 +69,8 @@ function makeEnv(): Bindings {
 describe('trackImpressions', () => {
   beforeEach(() => {
     queryMock.mockReset();
-    isRecentEventMock.mockReset();
-    isRecentEventMock.mockResolvedValue(false);
-    insertAdEventMock.mockReset();
-    insertAdEventMock.mockResolvedValue(undefined);
+    insertEventIfNotRecentMock.mockReset();
+    insertEventIfNotRecentMock.mockResolvedValue({ ok: true, insertedId: 1n });
     getDailySaltMock.mockReset();
     getDailySaltMock.mockResolvedValue('test-salt');
   });
@@ -96,8 +85,8 @@ describe('trackImpressions', () => {
       makeAd({ id: '00000000-0000-0000-0000-000000000002', kind: 'house' }),
     ];
     await trackImpressions(makeEnv(), ads, 'default', '1.2.3.4', 'Mozilla/5.0');
-    expect(insertAdEventMock).toHaveBeenCalledTimes(2);
-    const calls = insertAdEventMock.mock.calls;
+    expect(insertEventIfNotRecentMock).toHaveBeenCalledTimes(2);
+    const calls = insertEventIfNotRecentMock.mock.calls;
     expect(calls[0]?.[1]).toMatchObject({
       adId: '00000000-0000-0000-0000-000000000001',
       eventType: 'impression',
@@ -113,27 +102,25 @@ describe('trackImpressions', () => {
   it('skips placeholder ads', async () => {
     const ads = [makeAd({ id: '00000000-0000-0000-0000-000000000003', kind: 'placeholder' })];
     await trackImpressions(makeEnv(), ads, 'default', '1.2.3.4', 'ua');
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 
   it('skips DB work entirely if all ads are placeholders', async () => {
     const ads = [makeAd({ kind: 'placeholder' })];
     await trackImpressions(makeEnv(), ads, 'default', '1.2.3.4', null);
     expect(getDailySaltMock).not.toHaveBeenCalled();
-    expect(isRecentEventMock).not.toHaveBeenCalled();
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 
-  it('skips INSERT when isRecentEvent returns true (dedup)', async () => {
-    isRecentEventMock.mockResolvedValueOnce(true);
+  it('still calls insertEventIfNotRecent (which itself dedups) — duplicate result is no-op', async () => {
+    insertEventIfNotRecentMock.mockResolvedValueOnce({ ok: false, reason: 'duplicate' });
     const ads = [makeAd()];
     await trackImpressions(makeEnv(), ads, 'default', '1.2.3.4', 'ua');
-    expect(isRecentEventMock).toHaveBeenCalledTimes(1);
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).toHaveBeenCalledTimes(1);
   });
 
   it('swallows errors and does not throw', async () => {
-    insertAdEventMock.mockRejectedValueOnce(new Error('boom'));
+    insertEventIfNotRecentMock.mockRejectedValueOnce(new Error('boom'));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ads = [makeAd()];
     await expect(
@@ -145,6 +132,6 @@ describe('trackImpressions', () => {
 
   it('records nothing when ads array is empty', async () => {
     await trackImpressions(makeEnv(), [], 'default', '1.2.3.4', 'ua');
-    expect(insertAdEventMock).not.toHaveBeenCalled();
+    expect(insertEventIfNotRecentMock).not.toHaveBeenCalled();
   });
 });

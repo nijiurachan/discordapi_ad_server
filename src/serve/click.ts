@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { type PgClient, withPgClient } from '../db/client.ts';
-import { insertAdEvent, isRecentEvent } from '../db/queries/ad-events.ts';
+import { insertEventIfNotRecent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
 import { shouldRecordEvent } from '../utils/event-filter.ts';
 import { hashIP } from '../utils/ip-hash.ts';
@@ -48,16 +48,14 @@ export async function handleClick(c: Context<{ Bindings: Bindings }>): Promise<R
       try {
         const salt = await getDailySalt(client, c.env.IP_HASH_SALT_BOOTSTRAP);
         const ipHash = await hashIP(ip, salt);
-        const dup = await isRecentEvent(client, adId, ipHash, 'click');
-        if (!dup) {
-          await insertAdEvent(client, {
-            adId,
-            eventType: 'click',
-            ipHash,
-            ua,
-            slot: null,
-          });
-        }
+        await insertEventIfNotRecent(client, {
+          adId,
+          eventType: 'click',
+          ipHash,
+          ua,
+          slot: null,
+        });
+        // We don't branch on the result — best-effort.
       } catch (err) {
         console.warn('click: tracking failed (continuing redirect)', { adId, err });
       }

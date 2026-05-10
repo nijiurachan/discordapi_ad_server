@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { withPgClient } from '../db/client.ts';
-import { insertAdEvent, isRecentEvent } from '../db/queries/ad-events.ts';
+import { insertEventIfNotRecent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
 import { shouldRecordEvent } from '../utils/event-filter.ts';
 import { hashIP } from '../utils/ip-hash.ts';
@@ -98,15 +98,14 @@ export async function trackImpressions(
       const salt = await getDailySalt(client, env.IP_HASH_SALT_BOOTSTRAP);
       const ipHash = await hashIP(ip, salt);
       for (const ad of trackable) {
-        const dup = await isRecentEvent(client, ad.id, ipHash, 'impression');
-        if (dup) continue;
-        await insertAdEvent(client, {
+        await insertEventIfNotRecent(client, {
           adId: ad.id,
           eventType: 'impression',
           ipHash,
           ua,
           slot,
         });
+        // result.ok===false means dedup hit; nothing to do.
       }
     });
   } catch (err) {
