@@ -65,6 +65,12 @@ describe('sslConfig', () => {
     expect(sslConfig('postgres://u:p@abc123.hyperdrive.local:5432/db')).toBe(false);
   });
 
+  it('still uses TLS for a real host that merely contains "hyperdrive"', () => {
+    expect(sslConfig('postgres://u:p@hyperdrive.example.com:5432/db')).toEqual({
+      rejectUnauthorized: false,
+    });
+  });
+
   it('honors explicit sslmode in the URL', () => {
     expect(sslConfig('postgres://u:p@host/db?sslmode=disable')).toBe(false);
     expect(sslConfig('postgres://u:p@host/db?sslmode=require')).toEqual({
