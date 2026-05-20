@@ -6,7 +6,6 @@ import { shouldRecordEvent } from '../utils/event-filter.ts';
 import { hashIP } from '../utils/ip-hash.ts';
 import { getDailySalt } from '../utils/salt.ts';
 import { handleClick } from './click.ts';
-import { handleImage } from './image.ts';
 import { type ServedAd, serveAds } from './pick.ts';
 import { clickRateLimit, serveRateLimit } from './rate-limit.ts';
 import { requireSiteKey } from './site-key.ts';
@@ -85,7 +84,8 @@ serveRouter.get('/serve', async (c) => {
   });
 });
 
-serveRouter.get('/image/:adId', handleImage);
+// Images are served directly from public object storage (S3_PUBLIC_BASE_URL);
+// the Worker is intentionally not in the image path. See buildPublicImageUrl.
 serveRouter.get('/click/:adId', handleClick);
 
 /**
