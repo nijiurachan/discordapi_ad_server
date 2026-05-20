@@ -40,6 +40,9 @@ export function sslConfig(url: string): pg.PoolConfig['ssl'] {
   if (sslmode === 'require' || sslmode === 'prefer' || sslmode === 'no-verify') {
     return { rejectUnauthorized: false };
   }
+  // Hyperdrive's local endpoint terminates TLS to the origin itself; the
+  // Worker -> Hyperdrive hop is local and must connect WITHOUT TLS.
+  if (host.includes('hyperdrive')) return false;
   if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '') return false;
   return { rejectUnauthorized: false };
 }

@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { getAdEditable, updateAdImage } from '../../db/queries/ad-edits.ts';
 import { writeAdminLog } from '../../db/queries/admin-logs.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
@@ -146,7 +146,7 @@ export async function handleAdminReplaceImage(
     accessKeyId: c.env.S3_ACCESS_KEY_ID,
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(c.env.POSTGRES_URL, (client) =>
+  return withPgClient(resolveDbUrl(c.env), (client) =>
     runAdminReplaceImage(c, payload, {
       client,
       s3,

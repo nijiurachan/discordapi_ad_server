@@ -1,4 +1,4 @@
-import { withPgClient } from '../db/client.ts';
+import { resolveDbUrl, withPgClient } from '../db/client.ts';
 import { createDiscordRest } from '../discord/rest.ts';
 import type { Bindings } from '../env.ts';
 import { createS3Client } from '../storage/s3.ts';
@@ -48,20 +48,20 @@ async function runHourly(env: Bindings): Promise<void> {
       accessKeyId: env.S3_ACCESS_KEY_ID,
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
     });
-    const result = await withPgClient(env.POSTGRES_URL, (client) =>
+    const result = await withPgClient(resolveDbUrl(env), (client) =>
       sweepExpiredDrafts(client, s3, env.S3_BUCKET),
     );
     console.log('cron.hourly.sweep-drafts', result);
   });
 
   await runSafely('expire-ads', async () => {
-    const result = await withPgClient(env.POSTGRES_URL, (client) => expireAds(client));
+    const result = await withPgClient(resolveDbUrl(env), (client) => expireAds(client));
     console.log('cron.hourly.expire-ads', result);
   });
 
   await runSafely('dm-fallback-sweep', async () => {
     const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-    const result = await withPgClient(env.POSTGRES_URL, (client) =>
+    const result = await withPgClient(resolveDbUrl(env), (client) =>
       sweepDmFallbackChannels(client, rest),
     );
     console.log('cron.hourly.dm-fallback-sweep', result);
@@ -70,18 +70,18 @@ async function runHourly(env: Bindings): Promise<void> {
 
 async function runDaily(env: Bindings): Promise<void> {
   await runSafely('rotate-salt', async () => {
-    const result = await withPgClient(env.POSTGRES_URL, (client) => rotateDailySalt(client));
+    const result = await withPgClient(resolveDbUrl(env), (client) => rotateDailySalt(client));
     console.log('cron.daily.rotate-salt', result);
   });
 
   await runSafely('sweep-ad-events', async () => {
-    const result = await withPgClient(env.POSTGRES_URL, (client) => sweepAdEvents(client));
+    const result = await withPgClient(resolveDbUrl(env), (client) => sweepAdEvents(client));
     console.log('cron.daily.sweep-ad-events', result);
   });
 
   await runSafely('health-summary', async () => {
     const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-    const result = await withPgClient(env.POSTGRES_URL, (client) =>
+    const result = await withPgClient(resolveDbUrl(env), (client) =>
       postSystemHealthSummary(client, rest, env.ADMIN_CHANNEL_ID),
     );
     console.log('cron.daily.health-summary', result);
