@@ -65,7 +65,7 @@ using Tunnel" 参照、UI 細部は最新版に従う）:
 3. 生成された **Hyperdrive ID** を控える（§4 で wrangler.toml に記入）。
 
 > ⚠️ **コード側の既知の制約（要対応・開発側で修正可）**:
-> 現状コードは hot path（`/ads/serve`, `/ads/click`, `/ads/image`）だけ Hyperdrive を使い、
+> 現状コードは hot path（`/ads/serve`, `/ads/click`）だけ Hyperdrive を使い、
 > **cron 6本（sweep-drafts / expire-ads / dm-fallback-sweep / rotate-salt / sweep-ad-events /
 > health-summary）は `POSTGRES_URL` を直接使う**。Tailscale-only PG のままだとデプロイ後に
 > **cron が全部 DB 接続失敗**する。対応はどちらか:
