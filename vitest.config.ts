@@ -26,6 +26,7 @@ export default defineWorkersConfig({
             S3_BUCKET: 'test',
             S3_ACCESS_KEY_ID: 'test',
             S3_SECRET_ACCESS_KEY: 'test',
+            S3_PUBLIC_BASE_URL: 'https://cdn.test/bucket',
             IP_HASH_SALT_BOOTSTRAP: 'test-salt',
             IMPRESSION_TOKEN_SECRET: 'test-impression-secret-do-not-use-in-prod',
             WORKER_BASE_URL: 'http://localhost:8787',

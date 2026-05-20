@@ -28,6 +28,17 @@ export function parseN(raw: string | undefined): number {
   return Math.min(parsed, MAX_N);
 }
 
+/**
+ * Build the public image URL for direct (non-proxied) delivery.
+ * Joins S3_PUBLIC_BASE_URL with the stored image_key, normalizing the
+ * boundary slash so a trailing slash on the base or a leading slash on
+ * the key won't produce `//`. Returns null when the ad has no image.
+ */
+export function buildPublicImageUrl(baseUrl: string, imageKey: string | null): string | null {
+  if (!imageKey) return null;
+  return `${baseUrl.replace(/\/+$/, '')}/${imageKey.replace(/^\/+/, '')}`;
+}
+
 serveRouter.get('/serve', async (c) => {
   const slot = c.req.query('slot') ?? 'default';
   const n = parseN(c.req.query('n'));
@@ -53,7 +64,7 @@ serveRouter.get('/serve', async (c) => {
         kind: ad.kind,
         title: ad.title,
         body: ad.body,
-        image_url: `${c.env.WORKER_BASE_URL}/ads/image/${ad.id}`,
+        image_url: buildPublicImageUrl(c.env.S3_PUBLIC_BASE_URL, ad.imageKey),
         click_url: `${c.env.WORKER_BASE_URL}/ads/click/${ad.id}`,
         impression_token: token,
       };
