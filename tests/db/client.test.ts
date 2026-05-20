@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { _resetPoolCacheForTests, createPgClient, resolveDbUrl } from '../../src/db/client.ts';
+import {
+  _resetPoolCacheForTests,
+  createPgClient,
+  resolveDbUrl,
+  sslConfig,
+} from '../../src/db/client.ts';
 import type { Bindings } from '../../src/env.ts';
 
 describe('createPgClient', () => {
@@ -41,6 +46,32 @@ describe('resolveDbUrl', () => {
       HYPERDRIVE: { connectionString: 'postgres://hyperdrive/db' },
     } as unknown as Bindings;
     expect(resolveDbUrl(env)).toBe('postgres://hyperdrive/db');
+  });
+});
+
+describe('sslConfig', () => {
+  it('uses unverified TLS for remote hosts (public PG enforces hostssl)', () => {
+    expect(sslConfig('postgres://u:p@202.215.60.54:5432/db')).toEqual({
+      rejectUnauthorized: false,
+    });
+  });
+
+  it('skips TLS for localhost (local dev)', () => {
+    expect(sslConfig('postgres://u:p@localhost:5432/db')).toBe(false);
+    expect(sslConfig('postgres://u:p@127.0.0.1:5432/db')).toBe(false);
+  });
+
+  it('honors explicit sslmode in the URL', () => {
+    expect(sslConfig('postgres://u:p@host/db?sslmode=disable')).toBe(false);
+    expect(sslConfig('postgres://u:p@host/db?sslmode=require')).toEqual({
+      rejectUnauthorized: false,
+    });
+    expect(sslConfig('postgres://u:p@localhost/db?sslmode=require')).toEqual({
+      rejectUnauthorized: false,
+    });
+    expect(sslConfig('postgres://u:p@host/db?sslmode=verify-full')).toEqual({
+      rejectUnauthorized: true,
+    });
   });
 });
 

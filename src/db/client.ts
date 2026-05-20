@@ -15,6 +15,36 @@ const DEFAULT_TIMEOUT_MS = 3000;
 const POOL_MAX = 5;
 
 /**
+ * Decide the `ssl` option for a connection. Public Postgres typically enforces
+ * SSL in pg_hba.conf (`hostssl ...`), and node-postgres connects WITHOUT TLS
+ * by default — which the server rejects with "no pg_hba.conf entry ... no
+ * encryption". So:
+ *   - explicit `?sslmode=` in the URL wins (disable / require|prefer|no-verify
+ *     / verify-ca|verify-full)
+ *   - no sslmode: skip TLS for localhost (local dev), use unverified TLS for
+ *     remote hosts. `rejectUnauthorized: false` because self-hosted Postgres
+ *     usually presents a self-signed cert; transport is still encrypted.
+ */
+export function sslConfig(url: string): pg.PoolConfig['ssl'] {
+  let host = '';
+  let sslmode: string | null = null;
+  try {
+    const u = new URL(url);
+    host = u.hostname;
+    sslmode = u.searchParams.get('sslmode');
+  } catch {
+    return undefined;
+  }
+  if (sslmode === 'disable') return false;
+  if (sslmode === 'verify-full' || sslmode === 'verify-ca') return { rejectUnauthorized: true };
+  if (sslmode === 'require' || sslmode === 'prefer' || sslmode === 'no-verify') {
+    return { rejectUnauthorized: false };
+  }
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '') return false;
+  return { rejectUnauthorized: false };
+}
+
+/**
  * Per-isolate cache of pg.Pool instances keyed by connection string.
  * Cloudflare Workers isolates are short-lived but reused across many
  * requests; allocating a Pool per request (the original behaviour) was
@@ -51,6 +81,7 @@ function getOrCreatePool(url: string, opts: CreatePgClientOptions): pg.Pool {
   const pool = new pg.Pool({
     connectionString: url,
     max: POOL_MAX,
+    ssl: sslConfig(url),
     connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
     query_timeout: opts.queryTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
   });
@@ -80,6 +111,7 @@ export function createPgClient(url: string, opts: CreatePgClientOptions = {}): P
   const pool = new pg.Pool({
     connectionString: url,
     max: 1,
+    ssl: sslConfig(url),
     connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
     query_timeout: opts.queryTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
   });
