@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { withdrawAd } from '../../db/queries/ads.ts';
 import type {
   ApplicationCommandInteractionPayload,
@@ -45,7 +45,7 @@ export async function handleAdWithdrawCommand(
   const sub = payload.data.options?.find((o) => o.name === 'withdraw');
   const idOpt = sub?.options?.find((o) => o.name === 'id');
   const adId = typeof idOpt?.value === 'string' ? idOpt.value : '';
-  return withPgClient(c.env.POSTGRES_URL, (client) => runAdWithdraw(c, userId, adId, { client }));
+  return withPgClient(resolveDbUrl(c.env), (client) => runAdWithdraw(c, userId, adId, { client }));
 }
 
 export async function handleAdWithdrawButton(
@@ -57,5 +57,5 @@ export async function handleAdWithdrawButton(
   // custom_id format: ad:withdraw:{adId}
   const parts = payload.data.custom_id.split(':');
   const adId = parts[2] ?? '';
-  return withPgClient(c.env.POSTGRES_URL, (client) => runAdWithdraw(c, userId, adId, { client }));
+  return withPgClient(resolveDbUrl(c.env), (client) => runAdWithdraw(c, userId, adId, { client }));
 }

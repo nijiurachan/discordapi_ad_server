@@ -1,6 +1,6 @@
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import { Hono } from 'hono';
-import { withPgClient } from './db/client.ts';
+import { resolveDbUrl, withPgClient } from './db/client.ts';
 import type { Bindings } from './env.ts';
 import { createS3Client } from './storage/s3.ts';
 
@@ -20,7 +20,7 @@ health.get('/', async (c) => {
   // DB probe: pg.Pool's connectionTimeoutMillis + query_timeout cancel at the
   // driver level so a hung connection cannot leak past the response.
   try {
-    await withPgClient(c.env.POSTGRES_URL, (db) => db.query('SELECT 1'));
+    await withPgClient(resolveDbUrl(c.env), (db) => db.query('SELECT 1'));
     checks.db = 'ok';
   } catch (err) {
     console.error('health: db probe failed', err);

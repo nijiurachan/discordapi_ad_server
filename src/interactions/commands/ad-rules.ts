@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import type {
   ApplicationCommandInteractionPayload,
   MessageComponentInteractionPayload,
@@ -31,5 +31,5 @@ export async function handleAdRules(
   c: Context<{ Bindings: Bindings }>,
   _payload: ApplicationCommandInteractionPayload | MessageComponentInteractionPayload,
 ): Promise<Response> {
-  return withPgClient(c.env.POSTGRES_URL, (client) => runAdRules(c, 'default', { client }));
+  return withPgClient(resolveDbUrl(c.env), (client) => runAdRules(c, 'default', { client }));
 }

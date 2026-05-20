@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type {
   ApplicationCommandInteractionPayload,
@@ -289,7 +289,7 @@ export async function handleAdSubmit(
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
 
-  return withPgClient(c.env.POSTGRES_URL, (client) =>
+  return withPgClient(resolveDbUrl(c.env), (client) =>
     runAdSubmit(c, payload, {
       client,
       rest,

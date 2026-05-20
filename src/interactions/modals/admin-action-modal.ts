@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { withPgClient } from '../../db/client.ts';
+import { resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
 import { createDiscordRest } from '../../discord/rest.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
@@ -48,7 +48,7 @@ export async function handleAdminActionModal(
   const actorId = payload.member?.user?.id ?? payload.user?.id ?? 'unknown';
   const rest = createDiscordRest({ token: c.env.DISCORD_BOT_TOKEN });
 
-  const result = await withPgClient(c.env.POSTGRES_URL, async (client) => {
+  const result = await withPgClient(resolveDbUrl(c.env), async (client) => {
     if (action === 'pause') return pauseAd(client, actorId, adId);
     if (action === 'resume') return resumeAd(client, actorId, adId);
     if (action === 'force-end') return forceEndAdAction(client, actorId, adId, { rest });

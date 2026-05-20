@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type {
@@ -252,7 +252,7 @@ export async function handleAdminSubmit(
     accessKeyId: c.env.S3_ACCESS_KEY_ID,
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(c.env.POSTGRES_URL, (client) =>
+  return withPgClient(resolveDbUrl(c.env), (client) =>
     runAdminSubmit(c, payload, {
       client,
       rest,

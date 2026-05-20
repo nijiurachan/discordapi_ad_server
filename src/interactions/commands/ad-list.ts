@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { getSponsorAds } from '../../db/queries/ads.ts';
 import type {
   ActionRowComponent,
@@ -119,7 +119,7 @@ export async function handleAdList(
     accessKeyId: env.S3_ACCESS_KEY_ID,
     secretAccessKey: env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(env.POSTGRES_URL, (client) =>
+  return withPgClient(resolveDbUrl(env), (client) =>
     runAdList(c, userId, {
       client,
       s3,

@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { SystemSettingKey, getSystemSetting, setSystemSetting } from '../../db/settings.ts';
 import { buildAdminMenuMessage } from '../../discord/admin-menu.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
@@ -116,7 +116,7 @@ export async function handleAdSetup(
   const env = c.env;
   const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
   const actorId = payload.member?.user.id ?? payload.user?.id ?? 'unknown';
-  return withPgClient(env.POSTGRES_URL, (client) =>
+  return withPgClient(resolveDbUrl(env), (client) =>
     runAdSetup(c, payload, { rest, client, actorId }),
   );
 }

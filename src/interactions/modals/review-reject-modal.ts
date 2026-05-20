@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, withPgClient } from '../../db/client.ts';
+import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
 import { insertReviewLog, updateAdStatusOptimistic } from '../../db/queries/review.ts';
 import { buildReviewOutcomeEmbed } from '../../discord/embeds/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
@@ -242,7 +242,7 @@ export async function handleRejectModal(
 ): Promise<Response> {
   const env = c.env;
   const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-  return withPgClient(env.POSTGRES_URL, (client) =>
+  return withPgClient(resolveDbUrl(env), (client) =>
     runRejectModal(c, payload, {
       rest,
       client,
