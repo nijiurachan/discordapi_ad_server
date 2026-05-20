@@ -1,6 +1,6 @@
 import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { parseN } from '../../src/serve/router.ts';
+import { buildPublicImageUrl, parseN } from '../../src/serve/router.ts';
 
 describe('parseN', () => {
   it('defaults to 1 when undefined', () => {
@@ -31,6 +31,27 @@ describe('parseN', () => {
     expect(parseN('2')).toBe(2);
     expect(parseN('3')).toBe(3);
     expect(parseN('4')).toBe(4);
+  });
+});
+
+describe('buildPublicImageUrl', () => {
+  it('joins base + key for direct delivery', () => {
+    expect(buildPublicImageUrl('https://cdn.example.com/bucket', 'ads/abc/orig.png')).toBe(
+      'https://cdn.example.com/bucket/ads/abc/orig.png',
+    );
+  });
+
+  it('normalizes the boundary slash (trailing on base / leading on key)', () => {
+    expect(buildPublicImageUrl('https://cdn.example.com/bucket/', 'ads/abc/orig.png')).toBe(
+      'https://cdn.example.com/bucket/ads/abc/orig.png',
+    );
+    expect(buildPublicImageUrl('https://cdn.example.com/bucket/', '/ads/abc/orig.png')).toBe(
+      'https://cdn.example.com/bucket/ads/abc/orig.png',
+    );
+  });
+
+  it('returns null when the ad has no image_key', () => {
+    expect(buildPublicImageUrl('https://cdn.example.com/bucket/', null)).toBeNull();
   });
 });
 

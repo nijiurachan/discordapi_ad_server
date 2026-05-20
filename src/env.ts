@@ -20,6 +20,11 @@ export type Bindings = {
   S3_BUCKET: string;
   S3_ACCESS_KEY_ID: string;
   S3_SECRET_ACCESS_KEY: string;
+  // Public base URL for direct image delivery (bucket must be public-read).
+  // /ads/serve returns `${S3_PUBLIC_BASE_URL}<image_key>` so clients fetch
+  // images straight from object storage instead of through the Worker proxy.
+  // Trailing slash optional — joined safely.
+  S3_PUBLIC_BASE_URL: string;
   SITE_API_KEY?: string;
   IP_HASH_SALT_BOOTSTRAP: string;
   IMPRESSION_TOKEN_SECRET: string;

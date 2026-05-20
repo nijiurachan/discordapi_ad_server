@@ -49,6 +49,7 @@ function buildEnv(): Bindings {
     S3_BUCKET: 'b',
     S3_ACCESS_KEY_ID: 'k',
     S3_SECRET_ACCESS_KEY: 's',
+    S3_PUBLIC_BASE_URL: 'https://cdn.test/bucket',
     IP_HASH_SALT_BOOTSTRAP: 'salt',
     IMPRESSION_TOKEN_SECRET: 'impression-secret',
     WORKER_BASE_URL: 'https://worker.example',
