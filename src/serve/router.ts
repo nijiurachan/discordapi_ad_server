@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { withPgClient } from '../db/client.ts';
 import { insertEventIfNotRecent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
@@ -13,8 +14,23 @@ import { generateImpressionToken } from './token.ts';
 
 export const serveRouter = new Hono<{ Bindings: Bindings }>();
 
-// /ads/serve: optional site-key validation + per-IP rate limit (60/min).
-serveRouter.use('/serve', requireSiteKey, serveRateLimit);
+// CORS for /ads/serve so third-party sites can fetch the ad directly from the
+// browser. The response is intentionally public delivery data (image_url,
+// click_url, impression_token) — nothing sensitive — so Allow-Origin: * is
+// safe. Site-key, if set, is exchanged via a custom header that requires
+// preflight; handle OPTIONS explicitly here.
+const serveCors = createMiddleware<{ Bindings: Bindings }>(async (c, next) => {
+  c.header('Access-Control-Allow-Origin', '*');
+  c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  c.header('Access-Control-Allow-Headers', 'X-Site-Key, Content-Type, Accept');
+  c.header('Access-Control-Max-Age', '600');
+  if (c.req.method === 'OPTIONS') return c.body(null, 204);
+  return next();
+});
+
+// /ads/serve: CORS first (so 204 preflight returns before auth), then optional
+// site-key validation + per-IP rate limit (60/min).
+serveRouter.use('/serve', serveCors, requireSiteKey, serveRateLimit);
 // /ads/click/:adId: per-IP+adId rate limit (10/min). No site key (clicks come from third-party HTML).
 serveRouter.use('/click/:adId', clickRateLimit);
 
