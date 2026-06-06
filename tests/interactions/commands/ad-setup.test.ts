@@ -128,8 +128,8 @@ describe('runAdSetup', () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [
-        { rows: [{ value: 'msg-old' }] }, // old message_id
-        { rows: [{ value: 'chan-old' }] }, // old channel_id
+        { rows: [{ value: JSON.stringify('msg-old') }] }, // old message_id
+        { rows: [{ value: JSON.stringify('chan-old') }] }, // old channel_id
         { rows: [] }, // upsert message_id
         { rows: [] }, // upsert channel_id
       ],
@@ -154,8 +154,8 @@ describe('runAdSetup', () => {
 
   it('old menu delete fails (404): swallowed, still posts new', async () => {
     const client = mockClient([
-      { rows: [{ value: 'msg-old' }] }, // old message_id
-      { rows: [{ value: 'chan-old' }] }, // old channel_id
+      { rows: [{ value: JSON.stringify('msg-old') }] }, // old message_id
+      { rows: [{ value: JSON.stringify('chan-old') }] }, // old channel_id
       { rows: [] }, // upsert message_id
       { rows: [] }, // upsert channel_id
     ]);

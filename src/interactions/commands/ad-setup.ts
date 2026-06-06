@@ -8,6 +8,7 @@ import type {
   ApplicationCommandInteractionPayload,
 } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
+import { type FormatRules, fetchFormatRules } from '../../validation/rules.ts';
 import { ephemeral } from '../responses.ts';
 
 export type AdSetupDeps = {
@@ -41,13 +42,49 @@ const CHANNEL_KEY: Record<MenuKind, string> = {
   admin: SystemSettingKey.ADMIN_MENU_CHANNEL_ID,
 };
 
-function buildSubmitMenu(): { content: string; components: ActionRowComponent[] } {
+/**
+ * Render the key constraints of a slot's format rules as a Markdown block.
+ * Designed to be inlined into the submit menu so applicants see required
+ * dimensions / aspect ratios / file caps without an extra button click.
+ * Compact (~250 chars) to stay well under Discord's 2000-char content limit.
+ */
+function formatRulesSummary(rules: FormatRules): string {
+  const lines: string[] = [`### 📐 入稿ルール（slot=${rules.slot}）`];
+  lines.push(`• 形式: ${rules.allowedMimes.join(', ')}`);
+  const hasSize =
+    rules.minWidth != null ||
+    rules.maxWidth != null ||
+    rules.minHeight != null ||
+    rules.maxHeight != null;
+  if (hasSize) {
+    const w = `${rules.minWidth ?? '?'}–${rules.maxWidth ?? '?'}`;
+    const h = `${rules.minHeight ?? '?'}–${rules.maxHeight ?? '?'}`;
+    lines.push(`• サイズ: ${w} × ${h} px`);
+  }
+  lines.push(`• ファイル: 最大 ${(rules.maxBytes / 1024 / 1024).toFixed(1)} MB`);
+  if (rules.aspectRatios && rules.aspectRatios.length > 0) {
+    const tolPct = Math.round((rules.aspectTolerance ?? 0.02) * 100);
+    lines.push(`• アスペクト比: ${rules.aspectRatios.join(', ')}（±${tolPct}%）`);
+  }
+  lines.push(
+    `• タイトル ≤ ${rules.titleMaxLen} / 本文 ≤ ${rules.bodyMaxLen} / リンク ${rules.linkScheme.join('/')} のみ`,
+  );
+  return lines.join('\n');
+}
+
+function buildSubmitMenu(rules: FormatRules | null): {
+  content: string;
+  components: ActionRowComponent[];
+} {
+  const rulesBlock = rules
+    ? `\n\n${formatRulesSummary(rules)}`
+    : '\n\n_（入稿ルール未設定 — 管理者が「📐 入稿ルール」で設定するとここに表示されます）_';
   return {
-    content:
-      '## 📣 広告起稿システム\n\n' +
-      '起稿は下のチャット欄から `/ad submit`\n' +
-      '（slot を選び、image に画像を添付してください）\n' +
-      '添付後、タイトル / 本文 / リンクの入力画面が開きます。',
+    content: `## 📣 広告起稿システム
+
+起稿は下のチャット欄から \`/ad submit\`
+（slot を選び、image に画像を添付してください）
+添付後、タイトル / 本文 / リンクの入力画面が開きます。${rulesBlock}`,
     components: [
       {
         type: 1,
@@ -98,8 +135,15 @@ export async function runAdSetup(
     }
   }
 
-  // Post new menu
-  const menu = kind === 'admin' ? buildAdminMenuMessage() : buildSubmitMenu();
+  // Post new menu. For the submit menu, look up the default-slot rules so
+  // applicants see required dimensions / aspect ratios / file caps inline.
+  // (Re-run `/ad-setup kind:submit` after editing rules to refresh.)
+  // The two builders return different message shapes (content vs. embeds);
+  // `createMessage` accepts either as a JSON body, so widen via `Record`.
+  const menu: Record<string, unknown> =
+    kind === 'admin'
+      ? buildAdminMenuMessage()
+      : buildSubmitMenu(await fetchFormatRules(deps.client, 'default'));
   const message = await deps.rest.createMessage(channelId, menu);
 
   // Persist new message_id + channel_id
