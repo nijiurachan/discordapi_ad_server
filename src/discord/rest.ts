@@ -41,7 +41,16 @@ export type Channel = { id: string; name?: string; type: number };
 export type Message = { id: string; channel_id: string };
 
 export function createDiscordRest(o: DiscordRestOptions) {
-  const opts = { token: o.token, fetch: o.fetch ?? fetch };
+  // Cloudflare's `fetch` global is bound to WorkerGlobalScope; storing the
+  // bare reference on a plain object and invoking it via `opts.fetch(...)`
+  // strips `this` and triggers "Illegal invocation: function called with
+  // incorrect `this` reference". Bind to globalThis here. Caller-supplied
+  // mocks (e.g. `vi.fn(async ...)`) are passed through verbatim — those are
+  // anonymous functions with no `this` dependency.
+  const opts = {
+    token: o.token,
+    fetch: o.fetch ?? globalThis.fetch.bind(globalThis),
+  };
   return {
     getChannel: (id: string) => request<Channel>(opts, 'GET', `/channels/${id}`),
     deleteChannel: (id: string) => request<Channel>(opts, 'DELETE', `/channels/${id}`),
