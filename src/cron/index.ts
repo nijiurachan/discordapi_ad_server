@@ -2,6 +2,7 @@ import { withPgClient } from '../db/client.ts';
 import { createDiscordRest } from '../discord/rest.ts';
 import type { Bindings } from '../env.ts';
 import { createS3Client } from '../storage/s3.ts';
+import { auditSponsorMembership } from './audit-sponsor-membership.ts';
 import { sweepDmFallbackChannels } from './dm-fallback-sweep.ts';
 import { expireAds } from './expire-ads.ts';
 import { postSystemHealthSummary } from './health-summary.ts';
@@ -75,6 +76,14 @@ async function runDaily(env: Bindings): Promise<void> {
   await runSafely('sweep-ad-events', async () => {
     const result = await withPgClient(env, (client) => sweepAdEvents(client));
     console.log('cron.daily.sweep-ad-events', result);
+  });
+
+  await runSafely('audit-sponsor-membership', async () => {
+    const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
+    const result = await withPgClient(env, (client) =>
+      auditSponsorMembership(client, rest, env.GUILD_ID),
+    );
+    console.log('cron.daily.audit-sponsor-membership', result);
   });
 
   await runSafely('health-summary', async () => {
