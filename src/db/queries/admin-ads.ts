@@ -41,44 +41,51 @@ export type AdminListResult = {
   totalPages: number;
 };
 
+// D1 stores epoch ms in integer columns; wrap to Date so downstream code that
+// expects Date | null (admin-ads-list embed formatter etc.) keeps working.
+function toDate(v: number | string | Date | null): Date | null {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'number') return new Date(v);
+  // Defensive: if a legacy row arrives as ISO string, parse it.
+  return new Date(v);
+}
+
 export async function listAdminAds(
   client: PgClient,
   filters: AdminListFilters,
   page: number,
   pageSize: number,
 ): Promise<AdminListResult> {
+  // D1/SQLite only supports `?` placeholders; positional binding by push-order.
   const where: string[] = [];
   const params: unknown[] = [];
   if (filters.status) {
     params.push(filters.status);
-    where.push(`status = $${params.length}`);
+    where.push('status = ?');
   }
   if (filters.kind) {
     params.push(filters.kind);
-    where.push(`kind = $${params.length}`);
+    where.push('kind = ?');
   }
   if (filters.slot) {
     params.push(filters.slot);
-    where.push(`slot = $${params.length}`);
+    where.push('slot = ?');
   }
   if (filters.sponsorId) {
     params.push(filters.sponsorId);
-    where.push(`sponsor_id = $${params.length}`);
+    where.push('sponsor_id = ?');
   }
   const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
-  const countRes = await client.query<{ count: string }>(
+  const countRes = await client.query<{ count: number | string }>(
     `SELECT COUNT(*) AS count FROM ads ${whereClause}`,
     [...params],
   );
-  const totalCount = Number(countRes.rows[0]?.count ?? '0');
+  const totalCount = Number(countRes.rows[0]?.count ?? 0);
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(Math.max(1, page), totalPages);
   const offset = (safePage - 1) * pageSize;
-
-  const listParams = [...params, pageSize, offset];
-  const limitParam = listParams.length - 1;
-  const offsetParam = listParams.length;
 
   const res = await client.query<{
     id: string;
@@ -88,17 +95,17 @@ export async function listAdminAds(
     title: string;
     status: string;
     weight_snapshot: number | null;
-    created_at: Date;
-    starts_at: Date | null;
-    ends_at: Date | null;
+    created_at: number | string | Date;
+    starts_at: number | string | Date | null;
+    ends_at: number | string | Date | null;
   }>(
     `SELECT id, sponsor_id, kind, slot, title, status, weight_snapshot,
             created_at, starts_at, ends_at
        FROM ads
        ${whereClause}
        ORDER BY created_at DESC
-       LIMIT $${limitParam} OFFSET $${offsetParam}`,
-    listParams,
+       LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset],
   );
 
   const ads: AdminAdRow[] = res.rows.map((r) => ({
@@ -109,9 +116,9 @@ export async function listAdminAds(
     title: r.title,
     status: r.status as AdStatus,
     weightSnapshot: r.weight_snapshot,
-    createdAt: r.created_at,
-    startsAt: r.starts_at,
-    endsAt: r.ends_at,
+    createdAt: toDate(r.created_at) ?? new Date(0),
+    startsAt: toDate(r.starts_at),
+    endsAt: toDate(r.ends_at),
   }));
 
   return { ads, totalCount, page: safePage, pageSize, totalPages };

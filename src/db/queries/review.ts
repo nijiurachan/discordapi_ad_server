@@ -24,31 +24,34 @@ export async function updateAdStatusOptimistic(
   fromStatus: AdStatus,
   patch: StatusUpdatePatch,
 ): Promise<StatusUpdateResult> {
+  // D1/SQLite only supports `?` placeholders. Build SET clause and its params
+  // first (in order), then append the WHERE params at the end. `startsAt`
+  // accepts a literal 'now' to map to `(unixepoch() * 1000)` without a bind.
   const sets: string[] = ['status = ?'];
-  const params: unknown[] = [adId, fromStatus, patch.status];
-  let i = 4;
+  const setParams: unknown[] = [patch.status];
   if (Object.hasOwn(patch, 'rejectReason')) {
-    sets.push(`reject_reason = $${i++}`);
-    params.push(patch.rejectReason);
+    sets.push('reject_reason = ?');
+    setParams.push(patch.rejectReason);
   }
   if (Object.hasOwn(patch, 'reviewedBy')) {
-    sets.push(`reviewed_by = $${i++}`, 'reviewed_at = (unixepoch() * 1000)');
-    params.push(patch.reviewedBy);
+    sets.push('reviewed_by = ?', 'reviewed_at = (unixepoch() * 1000)');
+    setParams.push(patch.reviewedBy);
   }
   if (Object.hasOwn(patch, 'startsAt')) {
     if (patch.startsAt === 'now') {
       sets.push('starts_at = (unixepoch() * 1000)');
     } else {
-      sets.push(`starts_at = $${i++}`);
-      params.push(patch.startsAt);
+      sets.push('starts_at = ?');
+      // Date → epoch ms for SQLite integer column. null passes through.
+      setParams.push(patch.startsAt instanceof Date ? patch.startsAt.getTime() : patch.startsAt);
     }
   }
   if (Object.hasOwn(patch, 'weightSnapshot')) {
-    sets.push(`weight_snapshot = $${i++}`);
-    params.push(patch.weightSnapshot);
+    sets.push('weight_snapshot = ?');
+    setParams.push(patch.weightSnapshot);
   }
   const sql = `UPDATE ads SET ${sets.join(', ')} WHERE id = ? AND status = ?`;
-  const res = await client.query(sql, params);
+  const res = await client.query(sql, [...setParams, adId, fromStatus]);
   const rowsAffected = res.rowCount ?? 0;
   if (rowsAffected === 0) return { ok: false, reason: 'race' };
   return { ok: true, rowsAffected: 1 };
