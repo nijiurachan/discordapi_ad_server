@@ -44,11 +44,11 @@ export async function refreshSponsorTier(args: RefreshSponsorTierArgs): Promise<
   // 4. UPSERT sponsor row (display_name updated even if tier unchanged or null)
   await args.client.query(
     `INSERT INTO sponsors (discord_user_id, display_name, current_tier_id, updated_at)
-     VALUES ($1, $2, $3, now())
+     VALUES (?, ?, ?, (unixepoch() * 1000))
      ON CONFLICT (discord_user_id)
      DO UPDATE SET display_name = EXCLUDED.display_name,
                    current_tier_id = EXCLUDED.current_tier_id,
-                   updated_at = now()`,
+                   updated_at = (unixepoch() * 1000)`,
     [args.userId, args.displayName, matched?.id ?? null],
   );
 
@@ -57,9 +57,9 @@ export async function refreshSponsorTier(args: RefreshSponsorTierArgs): Promise<
 
 export async function countActiveAds(client: PgClient, sponsorId: string): Promise<number> {
   const res = await client.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count
+    `SELECT COUNT(*) AS count
        FROM ads
-      WHERE sponsor_id = $1
+      WHERE sponsor_id = ?
         AND status IN ('approved', 'pending')`,
     [sponsorId],
   );

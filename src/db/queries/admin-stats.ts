@@ -2,11 +2,13 @@ import type { PgClient } from '../client.ts';
 
 export type StatsPeriod = '24h' | '7d' | '30d' | '90d' | 'all';
 
-const PERIOD_INTERVAL: Record<StatsPeriod, string | null> = {
-  '24h': '24 hours',
-  '7d': '7 days',
-  '30d': '30 days',
-  '90d': '90 days',
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const PERIOD_MS: Record<StatsPeriod, number | null> = {
+  '24h': 24 * HOUR_MS,
+  '7d': 7 * DAY_MS,
+  '30d': 30 * DAY_MS,
+  '90d': 90 * DAY_MS,
   all: null,
 };
 
@@ -26,8 +28,9 @@ export async function getTopAdsStats(
   period: StatsPeriod,
   limit: number,
 ): Promise<AdminStatsRow[]> {
-  const interval = PERIOD_INTERVAL[period];
-  const tsCondition = interval ? `AND e.ts >= now() - interval '${interval}'` : '';
+  const windowMs = PERIOD_MS[period];
+  const tsCondition = windowMs !== null ? 'AND e.ts >= ?' : '';
+  const params: unknown[] = windowMs !== null ? [Date.now() - windowMs, limit] : [limit];
   const res = await client.query<{
     ad_id: string;
     sponsor_id: string | null;
@@ -37,21 +40,21 @@ export async function getTopAdsStats(
     impressions: string;
     clicks: string;
   }>(
-    `SELECT a.id::text AS ad_id,
+    `SELECT a.id AS ad_id,
             a.sponsor_id,
             a.kind,
             a.slot,
             a.title,
-            COUNT(*) FILTER (WHERE e.event_type = 'impression')::text AS impressions,
-            COUNT(*) FILTER (WHERE e.event_type = 'click')::text       AS clicks
+            COUNT(*) FILTER (WHERE e.event_type = 'impression') AS impressions,
+            COUNT(*) FILTER (WHERE e.event_type = 'click')       AS clicks
        FROM ads a
        LEFT JOIN ad_events e ON e.ad_id = a.id ${tsCondition}
       WHERE a.kind <> 'placeholder'
       GROUP BY a.id, a.sponsor_id, a.kind, a.slot, a.title
-      ORDER BY COUNT(*) FILTER (WHERE e.event_type = 'impression') DESC NULLS LAST,
-               COUNT(*) FILTER (WHERE e.event_type = 'click') DESC NULLS LAST
-      LIMIT $1`,
-    [limit],
+      ORDER BY COUNT(*) FILTER (WHERE e.event_type = 'impression') DESC,
+               COUNT(*) FILTER (WHERE e.event_type = 'click') DESC
+      LIMIT ?`,
+    params,
   );
   return res.rows.map((r) => {
     const impressions = Number(r.impressions);

@@ -23,7 +23,7 @@ export async function getAdById(client: PgClient, adId: string): Promise<AdSnaps
   }>(
     `SELECT id, sponsor_id, kind, status, title, starts_at, ends_at
        FROM ads
-      WHERE id = $1
+      WHERE id = ?
       LIMIT 1`,
     [adId],
   );
@@ -47,8 +47,8 @@ export async function updateAdStatus(
   newStatus: AdStatus,
 ): Promise<boolean> {
   const res = await client.query(
-    `UPDATE ads SET status = $1
-       WHERE id = $2 AND status = $3`,
+    `UPDATE ads SET status = ?
+       WHERE id = ? AND status = ?`,
     [newStatus, adId, expectedStatus],
   );
   return (res.rowCount ?? 0) > 0;
@@ -63,8 +63,8 @@ export async function forceEndAd(
   const res = await client.query(
     `UPDATE ads
         SET status = 'expired',
-            ends_at = now()
-      WHERE id = $1 AND status IN (${placeholders})`,
+            ends_at = (unixepoch() * 1000)
+      WHERE id = ? AND status IN (${placeholders})`,
     [adId, ...allowedStatuses],
   );
   return (res.rowCount ?? 0) > 0;

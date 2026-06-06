@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { withPgClient } from '../../db/client.ts';
 import { AdminButtonIds } from '../../discord/admin-menu.ts';
 import { createDiscordRest } from '../../discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../discord/types.ts';
@@ -17,9 +17,7 @@ export async function handleAdminSystemButton(
 
   if (buttonId === AdminButtonIds.SYSTEM_REPOST) {
     const rest = createDiscordRest({ token: c.env.DISCORD_BOT_TOKEN });
-    const result = await withPgClient(resolveDbUrl(c.env), (client) =>
-      repostAdminMenu(client, rest, actorId),
-    );
+    const result = await withPgClient(c.env, (client) => repostAdminMenu(client, rest, actorId));
     if (result.reposted.length === 0) {
       return ephemeral(
         c,
@@ -36,7 +34,7 @@ export async function handleAdminSystemButton(
   }
 
   if (buttonId === AdminButtonIds.SYSTEM_ROTATE_SALT) {
-    const result = await withPgClient(resolveDbUrl(c.env), (client) => rotateSalt(client, actorId));
+    const result = await withPgClient(c.env, (client) => rotateSalt(client, actorId));
     return ephemeral(
       c,
       `🔁 ip_hash_salt を即時ローテーションしました（length=${result.newSaltLength}）。新しいインプレッション/クリックは新ソルトで集計されます。`,
@@ -50,7 +48,7 @@ export async function handleAdminSystemButton(
       accessKeyId: c.env.S3_ACCESS_KEY_ID,
       secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
     });
-    const result = await withPgClient(resolveDbUrl(c.env), (client) =>
+    const result = await withPgClient(c.env, (client) =>
       runHealthCheck(client, s3, c.env.S3_BUCKET),
     );
     const overall = result.db === 'ok' && result.s3 === 'ok' ? '✅ 全系統 OK' : '⚠ 一部劣化';

@@ -1,6 +1,7 @@
 import type { PgClient } from '../db/client.ts';
 
-const RETENTION_INTERVAL = '180 days';
+const RETENTION_DAYS = 180;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_BATCH_SIZE = 1000;
 const DEFAULT_MAX_BATCHES = 1000; // hard ceiling: 1M rows per run
 
@@ -31,6 +32,9 @@ export async function sweepAdEvents(
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
   const maxBatches = options.maxBatches ?? DEFAULT_MAX_BATCHES;
 
+  // Compute the cutoff in JS; SQLite has no `interval` literal. Date.now() is
+  // hoisted out of the loop so all batches in one run share the same horizon.
+  const cutoff = Date.now() - RETENTION_DAYS * MS_PER_DAY;
   let batches = 0;
   let deleted = 0;
   while (batches < maxBatches) {
@@ -38,10 +42,10 @@ export async function sweepAdEvents(
       `DELETE FROM ad_events
         WHERE id IN (
           SELECT id FROM ad_events
-           WHERE ts < now() - interval '${RETENTION_INTERVAL}'
-           LIMIT $1
+           WHERE ts < ?
+           LIMIT ?
         )`,
-      [batchSize],
+      [cutoff, batchSize],
     );
     const n = res.rowCount ?? 0;
     if (n === 0) return { batches, deleted, hitMaxBatches: false };

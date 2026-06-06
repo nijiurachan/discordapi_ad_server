@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../db/client.ts';
+import { type PgClient, withPgClient } from '../db/client.ts';
 import { type AdminListFilters, getDistinctSlots, listAdminAds } from '../db/queries/admin-ads.ts';
 import {
   ADMIN_LIST_PAGE_SIZE,
@@ -64,7 +64,7 @@ export async function handleAdminAdsListButton(
   } else {
     return ephemeral(c, '不正なリスト操作です。');
   }
-  return withPgClient(resolveDbUrl(c.env), (client) => runAdminAdsList(c, state, client));
+  return withPgClient(c.env, (client) => runAdminAdsList(c, state, client));
 }
 
 export async function handleAdminAdsListEntry(
@@ -76,7 +76,7 @@ export async function handleAdminAdsListEntry(
     return ephemeral(c, '⚠ この操作には管理者ロールが必要です。');
   }
   const initial: AdminListState = { page: 1, ...initialFilters };
-  return withPgClient(resolveDbUrl(c.env), (client) =>
+  return withPgClient(c.env, (client) =>
     runAdminAdsList(c, initial, client, InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE),
   );
 }

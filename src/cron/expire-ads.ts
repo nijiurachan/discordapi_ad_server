@@ -14,7 +14,7 @@ export async function expireAds(client: PgClient): Promise<ExpireAdsResult> {
         SET status = 'expired'
       WHERE status = 'approved'
         AND ends_at IS NOT NULL
-        AND ends_at < now()`,
+        AND ends_at < (unixepoch() * 1000)`,
   );
   return { expired: res.rowCount ?? 0 };
 }

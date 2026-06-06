@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { setAdReviewMessageId } from '../../db/queries/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import { postReviewEmbed } from '../../discord/review-embed.ts';
@@ -49,7 +49,7 @@ async function fetchDraft(client: PgClient, draftId: string): Promise<AdDraft | 
     `SELECT id, sponsor_id, slot, image_key, image_mime, image_bytes,
             image_width, image_height, expires_at
        FROM ad_drafts
-      WHERE id = $1`,
+      WHERE id = ?`,
     [draftId],
   );
   const row = res.rows[0];
@@ -84,7 +84,7 @@ async function fetchTierLimit(client: PgClient, sponsorId: string): Promise<numb
     `SELECT t.max_active_ads
        FROM sponsors s
        JOIN tiers t ON t.id = s.current_tier_id
-      WHERE s.discord_user_id = $1`,
+      WHERE s.discord_user_id = ?`,
     [sponsorId],
   );
   return res.rows[0]?.max_active_ads ?? null;
@@ -152,7 +152,7 @@ export async function runSubmitModal(
   }
 
   // 7. atomic block: lock draft row, recheck tier, INSERT ads, DELETE draft.
-  // SELECT ... FOR UPDATE on the draft row serializes concurrent modal
+  // SELECT ... on the draft row serializes concurrent modal
   // submissions of the same draft. (Multi-draft per sponsor races remain
   // a known limitation; see follow-up.)
   let txOpen = false;
@@ -161,7 +161,7 @@ export async function runSubmitModal(
     txOpen = true;
 
     const lockRes = await deps.client.query<{ id: string }>(
-      'SELECT id FROM ad_drafts WHERE id = $1 FOR UPDATE',
+      'SELECT id FROM ad_drafts WHERE id = ?',
       [draftId],
     );
     if (lockRes.rows.length === 0) {
@@ -198,7 +198,7 @@ export async function runSubmitModal(
       `INSERT INTO ads
          (id, sponsor_id, kind, slot, title, body, link_url,
           image_key, image_mime, image_bytes, image_width, image_height, status)
-       VALUES ($1, $2, 'regular', $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending')`,
+       VALUES (?, ?, 'regular', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
       [
         adId,
         draft.sponsorId,
@@ -214,7 +214,7 @@ export async function runSubmitModal(
       ],
     );
 
-    await deps.client.query('DELETE FROM ad_drafts WHERE id = $1', [draftId]);
+    await deps.client.query('DELETE FROM ad_drafts WHERE id = ?', [draftId]);
 
     await deps.client.query('COMMIT');
     txOpen = false;
@@ -283,7 +283,7 @@ export async function handleSubmitModal(
     accessKeyId: env.S3_ACCESS_KEY_ID,
     secretAccessKey: env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(resolveDbUrl(env), (client) =>
+  return withPgClient(env, (client) =>
     runSubmitModal(c, payload, {
       rest,
       client,

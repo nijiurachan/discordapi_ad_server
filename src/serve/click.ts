@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../db/client.ts';
+import { type PgClient, withPgClient } from '../db/client.ts';
 import { insertEventIfNotRecent } from '../db/queries/ad-events.ts';
 import type { Bindings } from '../env.ts';
 import { shouldRecordEvent } from '../utils/event-filter.ts';
@@ -19,7 +19,7 @@ export function isValidAdId(adId: string): boolean {
 
 export async function getAdLinkUrl(client: PgClient, adId: string): Promise<AdRedirectInfo | null> {
   const res = await client.query<{ link_url: string; kind: string }>(
-    'SELECT link_url, kind FROM ads WHERE id = $1 LIMIT 1',
+    'SELECT link_url, kind FROM ads WHERE id = ? LIMIT 1',
     [adId],
   );
   const row = res.rows[0];
@@ -33,7 +33,7 @@ export async function handleClick(c: Context<{ Bindings: Bindings }>): Promise<R
     return c.text('invalid ad id', 400);
   }
 
-  const result = await withPgClient(resolveDbUrl(c.env), async (client) => {
+  const result = await withPgClient(c.env, async (client) => {
     const ad = await getAdLinkUrl(client, adId);
     if (!ad) return null;
 

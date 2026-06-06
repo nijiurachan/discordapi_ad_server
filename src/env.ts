@@ -14,7 +14,6 @@ export type Bindings = {
   FALLBACK_CHANNEL_CATEGORY_ID: string;
   REVIEWER_ROLE_ID: string;
   ADMIN_ROLE_ID: string;
-  POSTGRES_URL: string;
   S3_ENDPOINT: string;
   S3_REGION: string;
   S3_BUCKET: string;
@@ -32,9 +31,7 @@ export type Bindings = {
   TEST_OVERRIDE_ALLOWED?: string;
   SERVE_RATE_LIMITER: RateLimitBinding;
   CLICK_RATE_LIMITER: RateLimitBinding;
-  // Optional Cloudflare Hyperdrive binding. When present (Workers Paid plan
-  // + provisioned Hyperdrive instance), `resolveDbUrl()` in src/db/client.ts
-  // prefers HYPERDRIVE.connectionString over POSTGRES_URL. Stays optional so
-  // local `wrangler dev` and unit tests can run without it.
-  HYPERDRIVE?: Hyperdrive;
+  // Cloudflare D1 (SQLite) database. The only DB binding; replaces the prior
+  // Postgres + Hyperdrive setup. Bound in wrangler.toml as `DB`.
+  DB: D1Database;
 };

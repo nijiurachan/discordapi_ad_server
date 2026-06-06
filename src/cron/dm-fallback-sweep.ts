@@ -36,8 +36,8 @@ export async function sweepDmFallbackChannels(
     `SELECT id, channel_id, ad_id
        FROM dm_fallback_channels
       WHERE acknowledged_at IS NULL
-        AND expires_at < now()
-      LIMIT $1`,
+        AND expires_at < (unixepoch() * 1000)
+      LIMIT ?`,
     [BATCH_LIMIT],
   );
 
@@ -67,13 +67,14 @@ export async function sweepDmFallbackChannels(
     try {
       await client.query('BEGIN');
       txOpen = true;
-      await client.query('UPDATE dm_fallback_channels SET acknowledged_at = now() WHERE id = $1', [
-        row.id,
-      ]);
+      await client.query(
+        'UPDATE dm_fallback_channels SET acknowledged_at = (unixepoch() * 1000) WHERE id = ?',
+        [row.id],
+      );
       await client.query(
         `UPDATE ads
             SET dm_delivery_status = 'failed'
-          WHERE id = $1
+          WHERE id = ?
             AND (dm_delivery_status IS NULL OR dm_delivery_status NOT IN ('sent', 'fallback_acknowledged'))`,
         [row.ad_id],
       );

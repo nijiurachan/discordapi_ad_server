@@ -1,6 +1,11 @@
 import type { AdFormatRulesInput } from '../../validation/schemas.ts';
 import type { PgClient } from '../client.ts';
 
+// SQLite has no native arrays — `text[]` columns are stored as JSON strings.
+// Serialize on write; the read path in src/validation/rules.ts JSON.parses.
+const arr = (v: readonly string[] | null | undefined): string | null =>
+  v == null ? null : JSON.stringify(v);
+
 export async function upsertAdFormatRules(
   client: PgClient,
   rules: AdFormatRulesInput,
@@ -14,12 +19,12 @@ export async function upsertAdFormatRules(
         title_max_len, body_max_len, link_url_max_len,
         link_scheme, link_domain_allowlist, link_domain_blocklist,
         updated_at, updated_by)
-       VALUES ($1, $2, $3, $4,
-               $5, $6, $7, $8,
-               $9, $10,
-               $11, $12, $13,
-               $14, $15, $16,
-               now(), $17)
+       VALUES (?, ?, ?, ?,
+               ?, ?, ?, ?,
+               ?, ?,
+               ?, ?, ?,
+               ?, ?, ?,
+               (unixepoch() * 1000), ?)
      ON CONFLICT (slot) DO UPDATE SET
         allowed_mimes = EXCLUDED.allowed_mimes,
         allowed_extensions = EXCLUDED.allowed_extensions,
@@ -36,25 +41,25 @@ export async function upsertAdFormatRules(
         link_scheme = EXCLUDED.link_scheme,
         link_domain_allowlist = EXCLUDED.link_domain_allowlist,
         link_domain_blocklist = EXCLUDED.link_domain_blocklist,
-        updated_at = now(),
+        updated_at = (unixepoch() * 1000),
         updated_by = EXCLUDED.updated_by`,
     [
       rules.slot,
-      rules.allowedMimes,
-      rules.allowedExtensions,
+      arr(rules.allowedMimes),
+      arr(rules.allowedExtensions),
       rules.maxBytes,
       rules.minWidth ?? null,
       rules.maxWidth ?? null,
       rules.minHeight ?? null,
       rules.maxHeight ?? null,
-      rules.aspectRatios ?? null,
+      arr(rules.aspectRatios),
       rules.aspectTolerance ?? null,
       rules.titleMaxLen,
       rules.bodyMaxLen,
       rules.linkUrlMaxLen,
-      rules.linkScheme,
-      rules.linkDomainAllowlist ?? null,
-      rules.linkDomainBlocklist ?? null,
+      arr(rules.linkScheme),
+      arr(rules.linkDomainAllowlist),
+      arr(rules.linkDomainBlocklist),
       updatedBy,
     ],
   );

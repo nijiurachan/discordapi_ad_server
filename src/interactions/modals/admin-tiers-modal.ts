@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { withPgClient } from '../../db/client.ts';
 import { writeAdminLog } from '../../db/queries/admin-logs.ts';
 import { upsertTier } from '../../db/queries/tiers.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
@@ -146,7 +146,7 @@ export async function handleAdminTiersSubmitModal(
     return ephemeral(c, `❌ 入力エラー:\n• ${head}`);
   }
   const actorId = payload.member?.user?.id ?? payload.user?.id ?? 'unknown';
-  const result = await withPgClient(resolveDbUrl(c.env), async (client) => {
+  const result = await withPgClient(c.env, async (client) => {
     const out = await upsertTier(client, parsed.data);
     if (out.ok) {
       await writeAdminLog(client, {

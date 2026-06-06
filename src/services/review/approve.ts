@@ -21,7 +21,7 @@ async function lookupAdAndTierWeight(client: PgClient, adId: string): Promise<Ad
        FROM ads a
        LEFT JOIN sponsors s ON s.discord_user_id = a.sponsor_id
        LEFT JOIN tiers t ON t.id = s.current_tier_id
-      WHERE a.id = $1
+      WHERE a.id = ?
       LIMIT 1`,
     [adId],
   );
@@ -32,7 +32,7 @@ async function lookupAdAndTierWeight(client: PgClient, adId: string): Promise<Ad
 
 /**
  * Approve a pending ad. Freezes the sponsor's current Tier weight onto the ad row,
- * sets starts_at=now(), and inserts a review_logs entry.
+ * sets starts_at=(unixepoch() * 1000), and inserts a review_logs entry.
  * Uses optimistic concurrency (status='pending' guard) to prevent double-approve.
  * UPDATE + log INSERT run in a transaction; the persisted starts_at is read back
  * from the DB so the caller doesn't drift from the wall clock.
@@ -73,7 +73,7 @@ export async function approveAd(
     }
 
     const startsRes = await client.query<{ starts_at: Date }>(
-      'SELECT starts_at FROM ads WHERE id = $1',
+      'SELECT starts_at FROM ads WHERE id = ?',
       [adId],
     );
     const startsAt = startsRes.rows[0]?.starts_at ?? new Date();

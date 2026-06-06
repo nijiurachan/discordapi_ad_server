@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { setAdReviewMessageId } from '../../db/queries/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import { postReviewEmbed } from '../../discord/review-embed.ts';
@@ -59,7 +59,7 @@ async function fetchDraft(client: PgClient, draftId: string): Promise<AdminAdDra
             image_width, image_height, kind, weight, auto_approve,
             ends_in_days, created_by_admin, expires_at
        FROM ad_drafts
-      WHERE id = $1`,
+      WHERE id = ?`,
     [draftId],
   );
   const row = res.rows[0];
@@ -96,7 +96,7 @@ async function fetchSponsorTierWeight(client: PgClient, sponsorId: string): Prom
     `SELECT t.weight
        FROM sponsors s
        LEFT JOIN tiers t ON t.id = s.current_tier_id
-      WHERE s.discord_user_id = $1`,
+      WHERE s.discord_user_id = ?`,
     [sponsorId],
   );
   return res.rows[0]?.weight ?? null;
@@ -150,9 +150,9 @@ export async function runAdminSubmitModal(
 
   if (draft.kind === 'placeholder') {
     const dup = await deps.client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count
+      `SELECT COUNT(*) AS count
          FROM ads
-        WHERE kind = 'placeholder' AND slot = $1 AND status = 'approved'`,
+        WHERE kind = 'placeholder' AND slot = ? AND status = 'approved'`,
       [draft.slot],
     );
     if (Number(dup.rows[0]?.count ?? '0') > 0) {
@@ -167,10 +167,10 @@ export async function runAdminSubmitModal(
       );
     }
   }
-  const startsAt = isAutoApproved ? 'now()' : 'NULL';
+  const startsAt = isAutoApproved ? '(unixepoch() * 1000)' : 'NULL';
   const endsAtClause =
     draft.endsInDays && draft.endsInDays > 0
-      ? `now() + interval '${draft.endsInDays} days'`
+      ? `(unixepoch() * 1000) + interval '${draft.endsInDays} days'`
       : 'NULL';
   let weightSnapshot: number | null = draft.weight ?? null;
   if (isAutoApproved && weightSnapshot === null && draft.kind === 'regular' && draft.sponsorId) {
@@ -186,7 +186,7 @@ export async function runAdminSubmitModal(
     txOpen = true;
 
     const lockRes = await deps.client.query<{ id: string }>(
-      'SELECT id FROM ad_drafts WHERE id = $1 FOR UPDATE',
+      'SELECT id FROM ad_drafts WHERE id = ?',
       [draftId],
     );
     if (lockRes.rows.length === 0) {
@@ -206,8 +206,8 @@ export async function runAdminSubmitModal(
           image_key, image_mime, image_bytes, image_width, image_height,
           status, weight_snapshot, starts_at, ends_at,
           reviewed_by, reviewed_at, created_by_admin)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-         $13, $14, ${startsAt}, ${endsAtClause}, $15, $16, $17)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+         ?, ?, ${startsAt}, ${endsAtClause}, ?, ?, ?)`,
       [
         adId,
         draft.sponsorId,
@@ -231,7 +231,7 @@ export async function runAdminSubmitModal(
 
     await deps.client.query(
       `INSERT INTO admin_logs (actor_id, action, target_kind, target_id, after)
-         VALUES ($1, $2, 'ad', $3, $4::jsonb)`,
+         VALUES (?, ?, 'ad', ?, ?)`,
       [
         draft.createdByAdmin,
         isAutoApproved ? 'admin_submit_auto_approve' : 'admin_submit_pending',
@@ -247,7 +247,7 @@ export async function runAdminSubmitModal(
       ],
     );
 
-    await deps.client.query('DELETE FROM ad_drafts WHERE id = $1', [draftId]);
+    await deps.client.query('DELETE FROM ad_drafts WHERE id = ?', [draftId]);
     await deps.client.query('COMMIT');
     txOpen = false;
   } catch (err) {
@@ -309,7 +309,7 @@ export async function handleAdminSubmitModal(
     accessKeyId: c.env.S3_ACCESS_KEY_ID,
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(resolveDbUrl(c.env), (client) =>
+  return withPgClient(c.env, (client) =>
     runAdminSubmitModal(c, payload, {
       rest,
       client,

@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { withPgClient } from '../../db/client.ts';
 import { getAdEditable, updateAdContent } from '../../db/queries/ad-edits.ts';
 import { writeAdminLog } from '../../db/queries/admin-logs.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
@@ -67,7 +67,7 @@ export async function handleAdminEditOpenButton(
     return ephemeral(c, '⚠ この操作には管理者ロールが必要です。');
   }
   const adId = payload.data.custom_id.slice(ADMIN_EDIT_OPEN_PREFIX.length);
-  const ad = await withPgClient(resolveDbUrl(c.env), (client) => getAdEditable(client, adId));
+  const ad = await withPgClient(c.env, (client) => getAdEditable(client, adId));
   if (!ad) {
     return ephemeral(c, `広告 \`${adId}\` が見つかりません。`);
   }
@@ -139,7 +139,7 @@ export async function handleAdminEditSubmitModal(
   const linkUrl = findValue(payload, 'link_url').trim();
   const actorId = payload.member?.user?.id ?? payload.user?.id ?? 'unknown';
 
-  return withPgClient(resolveDbUrl(c.env), async (client) => {
+  return withPgClient(c.env, async (client) => {
     const before = await getAdEditable(client, adId);
     if (!before) return ephemeral(c, `広告 \`${adId}\` が見つかりません。`);
     const rules = await fetchFormatRules(client, before.slot);

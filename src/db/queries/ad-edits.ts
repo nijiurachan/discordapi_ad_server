@@ -16,7 +16,7 @@ export async function getAdEditable(
     body: string;
     link_url: string;
     slot: string;
-  }>('SELECT title, body, link_url, slot FROM ads WHERE id = $1 LIMIT 1', [adId]);
+  }>('SELECT title, body, link_url, slot FROM ads WHERE id = ? LIMIT 1', [adId]);
   const row = res.rows[0];
   if (!row) return null;
   return { title: row.title, body: row.body, linkUrl: row.link_url, slot: row.slot };
@@ -27,10 +27,12 @@ export async function updateAdContent(
   adId: string,
   fields: { title: string; body: string; linkUrl: string },
 ): Promise<boolean> {
-  const res = await client.query(
-    'UPDATE ads SET title = $1, body = $2, link_url = $3 WHERE id = $4',
-    [fields.title, fields.body, fields.linkUrl, adId],
-  );
+  const res = await client.query('UPDATE ads SET title = ?, body = ?, link_url = ? WHERE id = ?', [
+    fields.title,
+    fields.body,
+    fields.linkUrl,
+    adId,
+  ]);
   return (res.rowCount ?? 0) > 0;
 }
 
@@ -46,7 +48,7 @@ export async function updateAdImage(
   },
 ): Promise<{ previous: { imageKey: string | null; imageMime: string | null } } | null> {
   const before = await client.query<{ image_key: string | null; image_mime: string | null }>(
-    'SELECT image_key, image_mime FROM ads WHERE id = $1 LIMIT 1',
+    'SELECT image_key, image_mime FROM ads WHERE id = ? LIMIT 1',
     [adId],
   );
   if (before.rows.length === 0) return null;
@@ -56,12 +58,12 @@ export async function updateAdImage(
   };
   const upd = await client.query(
     `UPDATE ads
-        SET image_key = $1,
-            image_mime = $2,
-            image_bytes = $3,
-            image_width = $4,
-            image_height = $5
-      WHERE id = $6`,
+        SET image_key = ?,
+            image_mime = ?,
+            image_bytes = ?,
+            image_width = ?,
+            image_height = ?
+      WHERE id = ?`,
     [
       fields.imageKey,
       fields.imageMime,

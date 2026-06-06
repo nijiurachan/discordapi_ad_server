@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { findFallbackById, markFallbackAcknowledged } from '../../db/queries/fallback.ts';
 import { type DiscordRest, DiscordRestError, createDiscordRest } from '../../discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../discord/types.ts';
@@ -83,5 +83,5 @@ export async function handleAckButton(
 ): Promise<Response> {
   const env = c.env;
   const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-  return withPgClient(resolveDbUrl(env), (client) => runAckButton(c, payload, { rest, client }));
+  return withPgClient(env, (client) => runAckButton(c, payload, { rest, client }));
 }

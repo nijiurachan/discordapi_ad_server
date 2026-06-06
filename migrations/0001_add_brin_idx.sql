@@ -1,1 +1,0 @@
-CREATE INDEX IF NOT EXISTS "ad_events_ad_ts_idx" ON "ad_events" USING brin ("ad_id","ts");

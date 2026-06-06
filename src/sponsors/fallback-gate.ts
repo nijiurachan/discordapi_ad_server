@@ -21,13 +21,13 @@ async function autoCloseFallback(client: PgClient, fallbackId: string): Promise<
   await client.query('BEGIN');
   try {
     await client.query(
-      'UPDATE dm_fallback_channels SET acknowledged_at = now() WHERE id = $1 AND acknowledged_at IS NULL',
+      'UPDATE dm_fallback_channels SET acknowledged_at = (unixepoch() * 1000) WHERE id = ? AND acknowledged_at IS NULL',
       [fallbackId],
     );
     await client.query(
       `UPDATE ads
           SET dm_delivery_status = 'fallback_acknowledged'
-        WHERE id = (SELECT ad_id FROM dm_fallback_channels WHERE id = $1)`,
+        WHERE id = (SELECT ad_id FROM dm_fallback_channels WHERE id = ?)`,
       [fallbackId],
     );
     await client.query('COMMIT');
@@ -52,9 +52,9 @@ export async function blockIfUnackedFallback(
   }>(
     `SELECT id, channel_id, created_at
        FROM dm_fallback_channels
-      WHERE sponsor_id = $1
+      WHERE sponsor_id = ?
         AND acknowledged_at IS NULL
-        AND expires_at > now()
+        AND expires_at > (unixepoch() * 1000)
       ORDER BY created_at ASC`,
     [sponsorId],
   );

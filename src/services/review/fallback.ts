@@ -62,7 +62,7 @@ function buildAckButtonRow(fallbackId: string): Record<string, unknown> {
  *
  * Behavior:
  *  - If a fallback row exists for this ad with `acknowledged_at IS NULL` and
- *    `expires_at > now()`, append a new message to its channel and return
+ *    `expires_at > (unixepoch() * 1000)`, append a new message to its channel and return
  *    `reusedExisting: true`. No new INSERT, no `dm_delivery_status` UPDATE
  *    (it should already be 'fallback_posted').
  *  - Otherwise create a new private guild channel under `categoryId`, INSERT

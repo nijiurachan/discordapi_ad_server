@@ -1,26 +1,32 @@
 import { sql } from 'drizzle-orm';
 import {
-  bigint,
-  bigserial,
-  boolean,
   check,
   index,
   integer,
-  jsonb,
-  numeric,
-  pgTable,
-  pgView,
-  serial,
+  real,
+  sqliteTable,
+  sqliteView,
   text,
-  timestamp,
   unique,
-  uuid,
-} from 'drizzle-orm/pg-core';
+} from 'drizzle-orm/sqlite-core';
 
-export const tiers = pgTable(
+// D1/SQLite conventions used throughout:
+// - UUIDs: `text` (no AUTO_RANDOM). Generated in app code via `crypto.randomUUID()`
+//   and passed explicitly in every INSERT (no schema-level default).
+// - Timestamps: `integer` storing epoch milliseconds. Auto-now columns use
+//   `default(sql\`(unixepoch() * 1000)\`)` so raw SQL INSERTs that omit them
+//   still get a value.
+// - Booleans: `integer` (0/1).
+// - JSON arrays / objects (previously `jsonb` or `text[]` in Postgres): `text`
+//   storing a JSON string. Read/write sites JSON.parse/stringify explicitly.
+//   We do not use Drizzle's `{ mode: 'json' }` because all queries are raw SQL.
+
+const NOW_MS = sql`(unixepoch('subsec') * 1000)`;
+
+export const tiers = sqliteTable(
   'tiers',
   {
-    id: serial('id').primaryKey(),
+    id: integer('id').primaryKey({ autoIncrement: true }),
     discordRoleId: text('discord_role_id').notNull().unique(),
     name: text('name').notNull(),
     weight: integer('weight').notNull(),
@@ -34,17 +40,17 @@ export const tiers = pgTable(
   }),
 );
 
-export const sponsors = pgTable('sponsors', {
+export const sponsors = sqliteTable('sponsors', {
   discordUserId: text('discord_user_id').primaryKey(),
   displayName: text('display_name').notNull(),
   currentTierId: integer('current_tier_id').references(() => tiers.id),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: integer('updated_at').notNull().default(NOW_MS),
 });
 
-export const ads = pgTable(
+export const ads = sqliteTable(
   'ads',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
+    id: text('id').primaryKey(),
     // No onDelete cascade: ads must outlive sponsor deletion for audit/history
     // (status transitions to 'expired'/'withdrawn' instead of hard delete).
     sponsorId: text('sponsor_id').references(() => sponsors.discordUserId),
@@ -62,14 +68,14 @@ export const ads = pgTable(
     weightSnapshot: integer('weight_snapshot'),
     rejectReason: text('reject_reason'),
     reviewedBy: text('reviewed_by'),
-    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
-    startsAt: timestamp('starts_at', { withTimezone: true }),
-    endsAt: timestamp('ends_at', { withTimezone: true }),
+    reviewedAt: integer('reviewed_at'),
+    startsAt: integer('starts_at'),
+    endsAt: integer('ends_at'),
     reviewMessageId: text('review_message_id'),
     createdByAdmin: text('created_by_admin'),
     dmDeliveryStatus: text('dm_delivery_status'),
-    dmDeliveredAt: timestamp('dm_delivered_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    dmDeliveredAt: integer('dm_delivered_at'),
+    createdAt: integer('created_at').notNull().default(NOW_MS),
   },
   (t) => ({
     kindCheck: check('ads_kind_check', sql`${t.kind} IN ('regular','house','placeholder')`),
@@ -91,36 +97,38 @@ export const ads = pgTable(
       'ads_period_check',
       sql`${t.startsAt} IS NULL OR ${t.endsAt} IS NULL OR ${t.startsAt} <= ${t.endsAt}`,
     ),
+    // Partial index: only the approved rows pay the index-maintenance cost.
     activeIdx: index('ads_active_idx')
       .on(t.status, t.kind, t.slot, t.startsAt, t.endsAt)
       .where(sql`${t.status} = 'approved'`),
   }),
 );
 
-export const adFormatRules = pgTable('ad_format_rules', {
-  id: serial('id').primaryKey(),
+export const adFormatRules = sqliteTable('ad_format_rules', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
   slot: text('slot').notNull().unique(),
-  allowedMimes: text('allowed_mimes').array().notNull(),
-  allowedExtensions: text('allowed_extensions').array().notNull(),
+  // JSON arrays stored as text. Queries JSON.parse/stringify at the boundary.
+  allowedMimes: text('allowed_mimes').notNull(),
+  allowedExtensions: text('allowed_extensions').notNull(),
   maxBytes: integer('max_bytes').notNull(),
   minWidth: integer('min_width'),
   maxWidth: integer('max_width'),
   minHeight: integer('min_height'),
   maxHeight: integer('max_height'),
-  aspectRatios: text('aspect_ratios').array(),
-  aspectTolerance: numeric('aspect_tolerance', { precision: 4, scale: 3 }).default('0.020'),
+  aspectRatios: text('aspect_ratios'),
+  aspectTolerance: real('aspect_tolerance').default(0.02),
   titleMaxLen: integer('title_max_len').notNull().default(80),
   bodyMaxLen: integer('body_max_len').notNull().default(500),
   linkUrlMaxLen: integer('link_url_max_len').notNull().default(2048),
-  linkScheme: text('link_scheme').array().notNull().default(sql`ARRAY['https']::text[]`),
-  linkDomainAllowlist: text('link_domain_allowlist').array(),
-  linkDomainBlocklist: text('link_domain_blocklist').array(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  linkScheme: text('link_scheme').notNull().default(sql`'["https"]'`),
+  linkDomainAllowlist: text('link_domain_allowlist'),
+  linkDomainBlocklist: text('link_domain_blocklist'),
+  updatedAt: integer('updated_at').notNull().default(NOW_MS),
   updatedBy: text('updated_by'),
 });
 
-export const adDrafts = pgTable('ad_drafts', {
-  id: uuid('id').primaryKey().defaultRandom(),
+export const adDrafts = sqliteTable('ad_drafts', {
+  id: text('id').primaryKey(),
   // Nullable for admin-submitted house/placeholder drafts that have no sponsor.
   sponsorId: text('sponsor_id').references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
   slot: text('slot').notNull(),
@@ -132,52 +140,53 @@ export const adDrafts = pgTable('ad_drafts', {
   // Admin-submit extras (NULL for sponsor-submitted drafts).
   kind: text('kind'),
   weight: integer('weight'),
-  autoApprove: boolean('auto_approve'),
+  autoApprove: integer('auto_approve'),
   endsInDays: integer('ends_in_days'),
   createdByAdmin: text('created_by_admin'),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: integer('expires_at').notNull(),
+  createdAt: integer('created_at').notNull().default(NOW_MS),
 });
 
-export const adEvents = pgTable(
+export const adEvents = sqliteTable(
   'ad_events',
   {
-    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    id: integer('id').primaryKey({ autoIncrement: true }),
     // NO ACTION (not cascade) is intentional: ad_events is the impression/click
     // audit trail and must survive ads being soft-deleted (status='expired' /
     // 'withdrawn'). Hard-deleting an ad row should fail loudly here rather
     // than silently destroy historical traffic data.
-    adId: uuid('ad_id')
+    adId: text('ad_id')
       .notNull()
       .references(() => ads.id, { onDelete: 'no action' }),
     eventType: text('event_type').notNull(),
-    ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
+    ts: integer('ts').notNull().default(NOW_MS),
     ipHash: text('ip_hash'),
     ua: text('ua'),
     slot: text('slot'),
   },
   (t) => ({
     typeCheck: check('ad_events_type_check', sql`${t.eventType} IN ('impression','click')`),
-    adIdTsIdx: index('ad_events_ad_id_ts_idx').using('btree', t.adId, t.ts),
-    tsIdx: index('ad_events_ts_idx').using('brin', t.ts),
-    dedupIdx: index('idx_ad_events_dedup').using('btree', t.adId, t.ipHash, t.eventType, t.ts),
+    adIdTsIdx: index('ad_events_ad_id_ts_idx').on(t.adId, t.ts),
+    // SQLite only has btree, so the BRIN replacement is a plain btree on ts.
+    tsIdx: index('ad_events_ts_idx').on(t.ts),
+    dedupIdx: index('idx_ad_events_dedup').on(t.adId, t.ipHash, t.eventType, t.ts),
   }),
 );
 
-export const reviewLogs = pgTable(
+export const reviewLogs = sqliteTable(
   'review_logs',
   {
-    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    id: integer('id').primaryKey({ autoIncrement: true }),
     // NO ACTION (not cascade) is intentional: review_logs is the moderator
     // audit trail (approve/reject/withdraw decisions) and must outlive any
-    // hard-delete of the parent ad. The same rationale as ad_events above.
-    adId: uuid('ad_id')
+    // hard-delete of the parent ad. Same rationale as ad_events above.
+    adId: text('ad_id')
       .notNull()
       .references(() => ads.id, { onDelete: 'no action' }),
     reviewerId: text('reviewer_id').notNull(),
     action: text('action').notNull(),
     reason: text('reason'),
-    ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
+    ts: integer('ts').notNull().default(NOW_MS),
   },
   (t) => ({
     actionCheck: check(
@@ -187,38 +196,38 @@ export const reviewLogs = pgTable(
   }),
 );
 
-export const adminLogs = pgTable('admin_logs', {
-  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+export const adminLogs = sqliteTable('admin_logs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
   actorId: text('actor_id').notNull(),
   action: text('action').notNull(),
   targetKind: text('target_kind').notNull(),
   targetId: text('target_id'),
-  before: jsonb('before'),
-  after: jsonb('after'),
-  ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
+  before: text('before'),
+  after: text('after'),
+  ts: integer('ts').notNull().default(NOW_MS),
 });
 
-export const systemSettings = pgTable('system_settings', {
+export const systemSettings = sqliteTable('system_settings', {
   key: text('key').primaryKey(),
-  value: jsonb('value').notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at').notNull().default(NOW_MS),
   updatedBy: text('updated_by'),
 });
 
-export const dmFallbackChannels = pgTable(
+export const dmFallbackChannels = sqliteTable(
   'dm_fallback_channels',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    adId: uuid('ad_id')
+    id: text('id').primaryKey(),
+    adId: text('ad_id')
       .notNull()
       .references(() => ads.id),
     sponsorId: text('sponsor_id')
       .notNull()
       .references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
     channelId: text('channel_id').notNull().unique(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
+    createdAt: integer('created_at').notNull().default(NOW_MS),
+    expiresAt: integer('expires_at').notNull(),
+    acknowledgedAt: integer('acknowledged_at'),
   },
   (t) => ({
     pendingIdx: index('dm_fallback_pending_idx')
@@ -228,18 +237,19 @@ export const dmFallbackChannels = pgTable(
 );
 
 /**
- * Daily-bucketed impression/click counts. Hand-managed by
- * migrations/0004_ad_stats_daily_view.sql; declared `.existing()` so
- * drizzle-kit doesn't try to redefine it.
+ * Daily-bucketed impression/click counts. Hand-managed view (drizzle does not
+ * auto-create with `.existing()`). The body uses strftime() because `ts` is
+ * stored as epoch milliseconds; `ts/1000` converts to seconds, `'unixepoch'`
+ * interprets the integer as Unix time, then format as 'YYYY-MM-DD' UTC day.
  *
- * Use for whole-day reports (admin dashboards). Sponsor-facing rolling
- * windows (`24h` / `7d` / `30d`) deliberately query `ad_events` directly
- * — see the comment on `getAggregateStats` in src/db/queries/ads.ts for
- * why bucketing to days would lose intra-day boundary events.
+ * Use for whole-day reports (admin dashboards). Sponsor-facing rolling windows
+ * (`24h` / `7d` / `30d`) deliberately query `ad_events` directly — see the
+ * comment on `getAggregateStats` in src/db/queries/ads.ts for why day-bucketing
+ * would lose intra-day boundary events.
  */
-export const adStatsDaily = pgView('ad_stats_daily', {
-  adId: uuid('ad_id').notNull(),
-  day: timestamp('day', { withTimezone: true }).notNull(),
-  impressions: bigint('impressions', { mode: 'bigint' }).notNull(),
-  clicks: bigint('clicks', { mode: 'bigint' }).notNull(),
+export const adStatsDaily = sqliteView('ad_stats_daily', {
+  adId: text('ad_id').notNull(),
+  day: text('day').notNull(),
+  impressions: integer('impressions').notNull(),
+  clicks: integer('clicks').notNull(),
 }).existing();

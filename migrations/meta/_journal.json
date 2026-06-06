@@ -1,54 +1,12 @@
 {
   "version": "7",
-  "dialect": "postgresql",
+  "dialect": "sqlite",
   "entries": [
     {
       "idx": 0,
-      "version": "7",
-      "when": 1778154060930,
-      "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1778154368951,
-      "tag": "0001_add_brin_idx",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1778158393442,
-      "tag": "0002_constraints",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1778311921952,
-      "tag": "0003_review_message_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1778322792913,
-      "tag": "0004_ad_stats_daily_view",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1778400000000,
-      "tag": "0005_ad_events_dedup_index",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1778500000000,
-      "tag": "0006_admin_submit_drafts",
+      "version": "6",
+      "when": 1780711206468,
+      "tag": "0000_spicy_guardian",
       "breakpoints": true
     }
   ]

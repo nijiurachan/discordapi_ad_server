@@ -68,7 +68,7 @@ export async function listAdminAds(
   const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
   const countRes = await client.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM ads ${whereClause}`,
+    `SELECT COUNT(*) AS count FROM ads ${whereClause}`,
     [...params],
   );
   const totalCount = Number(countRes.rows[0]?.count ?? '0');

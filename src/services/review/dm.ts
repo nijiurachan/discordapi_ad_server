@@ -18,9 +18,9 @@ export async function setDmDeliveryStatus(
 ): Promise<void> {
   await client.query(
     `UPDATE ads
-        SET dm_delivery_status = $1,
-            dm_delivered_at    = $2
-      WHERE id = $3`,
+        SET dm_delivery_status = ?,
+            dm_delivered_at    = ?
+      WHERE id = ?`,
     [status, deliveredAt ?? null, adId],
   );
 }
@@ -36,7 +36,7 @@ export type SendResultDmArgs = {
 
 /**
  * Send the result DM (approve/reject) to the sponsor.
- * - On 200: set dm_delivery_status='sent', dm_delivered_at=now()
+ * - On 200: set dm_delivery_status='sent', dm_delivered_at=(unixepoch() * 1000)
  * - On 403 (DM disabled): set dm_delivery_status='failed', return { ok: false, reason: 'blocked' }
  *   so the caller can trigger the fallback channel flow (P3.5)
  * - For house/placeholder ads (sponsorId null): skip and return { ok: false, reason: 'no_sponsor' }
