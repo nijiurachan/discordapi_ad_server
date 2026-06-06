@@ -52,23 +52,47 @@
 
 ---
 
+## セキュリティ：URL スキーム検証は統合側でも行う
+
+`click_url` / `image_url` は配信サーバが生成しますが、第三者として統合する以上、サーバ側のバグや設定ミスで `javascript:` 等のスキームが返って来ても **ホストページが XSS にならない** ように、href/src に入れる前に **スキームを `https:` / `http:` に限定** してください。1 行のヘルパで済みます。
+
+```js
+const safeHttpUrl = (raw) => {
+  try {
+    const u = new URL(raw);
+    return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : '';
+  } catch { return ''; }
+};
+```
+
+以下の例はすべてこのヘルパを通します。`title` / `body` 等のテキストは React/Vue/textContent ベースで描画する限り自動エスケープされるので別途対応は不要です（`innerHTML` だけ避ければ OK）。
+
 ## A. 静的 HTML に最小構成で埋め込む
 
 ```html
 <div id="bmg-banner" style="display:inline-block;max-width:100%"></div>
 <script>
 (async () => {
+  const safeHttpUrl = (raw) => {
+    try {
+      const u = new URL(raw);
+      return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : '';
+    } catch { return ''; }
+  };
   const res = await fetch('https://ads.nijiurachan.net/ads/serve?slot=default&n=1');
   if (res.status === 204) return;
   const ad = (await res.json()).ads?.[0];
   if (!ad) return;
+  const href = safeHttpUrl(ad.click_url);
+  const src = safeHttpUrl(ad.image_url);
+  if (!href || !src) return; // 不正スキームは無音で破棄
   const a = document.createElement('a');
-  a.href = ad.click_url;
+  a.href = href;
   a.target = '_blank';
   a.rel = 'noopener sponsored';
   const img = document.createElement('img');
-  img.src = ad.image_url;
-  img.alt = ad.title;
+  img.src = src;
+  img.alt = ad.title; // 属性経由なので XSS 化しない
   img.loading = 'lazy';
   img.style.maxWidth = '100%';
   img.style.height = 'auto';
@@ -96,6 +120,15 @@ type Ad = {
   click_url: string;
 };
 
+function safeHttpUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : '';
+  } catch {
+    return '';
+  }
+}
+
 export function BmgBanner({ slot = 'default' }: { slot?: string }) {
   const [ad, setAd] = useState<Ad | null>(null);
   useEffect(() => {
@@ -110,10 +143,13 @@ export function BmgBanner({ slot = 'default' }: { slot?: string }) {
   }, [slot]);
 
   if (!ad) return null;
+  const href = safeHttpUrl(ad.click_url);
+  const src = safeHttpUrl(ad.image_url);
+  if (!href || !src) return null;
   return (
-    <a href={ad.click_url} target="_blank" rel="noopener sponsored">
+    <a href={href} target="_blank" rel="noopener sponsored">
       <img
-        src={ad.image_url}
+        src={src}
         alt={ad.title}
         loading="lazy"
         style={{ maxWidth: '100%', height: 'auto' }}
@@ -127,9 +163,17 @@ Vue 3 (Composition API)：
 
 ```vue
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 const props = defineProps<{ slot?: string }>();
 const ad = ref<any>(null);
+const safeHttpUrl = (raw: string) => {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : '';
+  } catch { return ''; }
+};
+const href = computed(() => (ad.value ? safeHttpUrl(ad.value.click_url) : ''));
+const src = computed(() => (ad.value ? safeHttpUrl(ad.value.image_url) : ''));
 onMounted(async () => {
   const r = await fetch(`https://ads.nijiurachan.net/ads/serve?slot=${props.slot ?? 'default'}&n=1`);
   if (r.status === 204) return;
@@ -138,8 +182,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <a v-if="ad" :href="ad.click_url" target="_blank" rel="noopener sponsored">
-    <img :src="ad.image_url" :alt="ad.title" loading="lazy" style="max-width:100%;height:auto" />
+  <a v-if="ad && href && src" :href="href" target="_blank" rel="noopener sponsored">
+    <img :src="src" :alt="ad.title" loading="lazy" style="max-width:100%;height:auto" />
   </a>
 </template>
 ```
@@ -150,6 +194,13 @@ onMounted(async () => {
 
 ```tsx
 // app/components/BmgBanner.tsx
+function safeHttpUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : '';
+  } catch { return ''; }
+}
+
 async function getAd(slot = 'default') {
   const r = await fetch(
     `https://ads.nijiurachan.net/ads/serve?slot=${slot}&n=1`,
@@ -163,9 +214,12 @@ async function getAd(slot = 'default') {
 export async function BmgBanner({ slot }: { slot?: string }) {
   const ad = await getAd(slot);
   if (!ad) return null;
+  const href = safeHttpUrl(ad.click_url);
+  const src = safeHttpUrl(ad.image_url);
+  if (!href || !src) return null;
   return (
-    <a href={ad.click_url} target="_blank" rel="noopener sponsored">
-      <img src={ad.image_url} alt={ad.title} loading="lazy" />
+    <a href={href} target="_blank" rel="noopener sponsored">
+      <img src={src} alt={ad.title} loading="lazy" />
     </a>
   );
 }
@@ -206,16 +260,25 @@ export async function BmgBanner({ slot }: { slot?: string }) {
 <div id="bmg-1"></div>
 <div id="bmg-2"></div>
 <script>
+const safeHttpUrl = (raw) => {
+  try {
+    const u = new URL(raw);
+    return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : '';
+  } catch { return ''; }
+};
 async function loadBanner(slot, mountId) {
   const r = await fetch(`https://ads.nijiurachan.net/ads/serve?slot=${slot}&n=1`);
   if (r.status === 204) return;
   const ad = (await r.json()).ads?.[0];
   if (!ad) return;
+  const href = safeHttpUrl(ad.click_url);
+  const src = safeHttpUrl(ad.image_url);
+  if (!href || !src) return;
   const a = Object.assign(document.createElement('a'), {
-    href: ad.click_url, target: '_blank', rel: 'noopener sponsored',
+    href, target: '_blank', rel: 'noopener sponsored',
   });
   a.appendChild(Object.assign(document.createElement('img'), {
-    src: ad.image_url, alt: ad.title, loading: 'lazy',
+    src, alt: ad.title, loading: 'lazy',
   }));
   document.getElementById(mountId).appendChild(a);
 }
@@ -236,5 +299,6 @@ loadBanner('default', 'bmg-2');
 - [ ] `image_url` が `https://storage.nijiurachan.net/` で始まっている (S3 直配信)
 - [ ] CORS エラーが出ていない
 - [ ] レスポンシブ崩れがない
+- [ ] `safeHttpUrl` などで href/src のスキームを `https:` / `http:` に絞っている (外部API信頼の境界)
 
 トラブル時はまず [/ads/demo](https://ads.nijiurachan.net/ads/demo) と比較してみてください。
