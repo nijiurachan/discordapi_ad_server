@@ -1,6 +1,7 @@
--- Seed: default-slot format rules tuned for 468x80 horizontal banner ads.
--- 468:80 simplifies to 117:20. Width/height ranges allow 1x-4x retina scaling
--- (468x80 baseline up to 1872x320) at the same aspect ratio.
+-- Seed: default-slot format rules locked to the IAB Full Banner (468×60).
+-- Input must be EXACTLY 468×60 — no auto-resize on the server, so the rule
+-- enforces the delivered display size at /ad submit time. Aspect ratio is
+-- carried alongside as a defensive check (already implied by the exact dims).
 -- Apply with:
 --   npx wrangler d1 execute discordadserver --remote \
 --       --file=scripts/seed-default-rules.sql
@@ -17,8 +18,8 @@ INSERT INTO ad_format_rules (
   '["image/png","image/jpeg","image/webp"]',
   '["png","jpg","jpeg","webp"]',
   1048576,
-  468, 1872, 80, 320,
-  '["117:20"]', 0.02,
+  468, 468, 60, 60,
+  '["39:5"]', 0.02,
   80, 500, 2048,
   '["https"]',
   (unixepoch() * 1000),
