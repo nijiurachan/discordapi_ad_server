@@ -186,10 +186,11 @@ export async function runAdSubmit(
   // the bucket doesn't accrue garbage on transient DB errors.
   try {
     await client.query(
+      // SQLite has no `interval` literal; epoch-ms math instead (10 min = 600,000 ms).
       `INSERT INTO ad_drafts
          (id, sponsor_id, slot, image_key, image_mime, image_bytes,
           image_width, image_height, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, (unixepoch() * 1000) + interval '10 minutes')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, (unixepoch() * 1000) + 600000)`,
       [
         draftId,
         userId,

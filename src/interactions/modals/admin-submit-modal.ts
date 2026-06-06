@@ -168,9 +168,12 @@ export async function runAdminSubmitModal(
     }
   }
   const startsAt = isAutoApproved ? '(unixepoch() * 1000)' : 'NULL';
+  // SQLite has no `interval` literal; convert days→ms at compile time.
+  // `endsInDays` is a JS number gated 1..365 by Discord command choices, so the
+  // product stays well below MAX_SAFE_INTEGER and inlining is safe.
   const endsAtClause =
     draft.endsInDays && draft.endsInDays > 0
-      ? `(unixepoch() * 1000) + interval '${draft.endsInDays} days'`
+      ? `(unixepoch() * 1000) + ${draft.endsInDays * 86_400_000}`
       : 'NULL';
   let weightSnapshot: number | null = draft.weight ?? null;
   if (isAutoApproved && weightSnapshot === null && draft.kind === 'regular' && draft.sponsorId) {
@@ -224,7 +227,9 @@ export async function runAdminSubmitModal(
         status,
         weightSnapshot,
         isAutoApproved ? draft.createdByAdmin : null,
-        isAutoApproved ? new Date() : null,
+        // `reviewed_at` is integer (epoch ms); binding a Date object would
+        // serialize as ISO string. Use Date.now() to stay numeric.
+        isAutoApproved ? Date.now() : null,
         draft.createdByAdmin,
       ],
     );

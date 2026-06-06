@@ -156,12 +156,13 @@ export async function runAdminSubmit(
 
   try {
     await deps.client.query(
+      // SQLite has no `interval` literal; epoch-ms math instead (10 min = 600,000 ms).
       `INSERT INTO ad_drafts
          (id, sponsor_id, slot, image_key, image_mime, image_bytes,
           image_width, image_height, kind, weight, auto_approve,
           ends_in_days, created_by_admin, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         (unixepoch() * 1000) + interval '10 minutes')`,
+         (unixepoch() * 1000) + 600000)`,
       [
         draftId,
         sponsorIdForDraft,
