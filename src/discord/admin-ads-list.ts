@@ -154,36 +154,44 @@ export function buildAdminAdsListComponents(
   const prevPage = Math.max(1, state.page - 1);
   const nextPage = Math.min(result.totalPages, state.page + 1);
 
+  // Discord rejects duplicate custom_ids within a single message. Two pitfalls
+  // tripped here:
+  //   1. The three select menus all used `adlist:select`.
+  //   2. prev/next buttons can resolve to the same target page (e.g. when the
+  //      list is empty, prevPage = nextPage = 1) — making their state-encoded
+  //      custom_ids identical.
+  // Append a non-state purpose discriminator (`_=prev`/`_=next`/`_=reset`) for
+  // buttons; decodeState silently ignores unknown keys, so state still round-trips.
   const navRow: ActionRowComponent = {
     type: 1,
     components: [
       {
         type: 2,
         style: ButtonStyle.SECONDARY,
-        custom_id: `${ADMIN_LIST_PREFIX}${encodeState({ ...state, page: prevPage })}`,
+        custom_id: `${ADMIN_LIST_PREFIX}${encodeState({ ...state, page: prevPage })}&_=prev`,
         label: '⬅ 前へ',
         disabled: state.page <= 1,
       },
       {
         type: 2,
         style: ButtonStyle.SECONDARY,
-        custom_id: `${ADMIN_LIST_PREFIX}${encodeState({ ...state, page: nextPage })}`,
+        custom_id: `${ADMIN_LIST_PREFIX}${encodeState({ ...state, page: nextPage })}&_=next`,
         label: '➡ 次へ',
         disabled: state.page >= result.totalPages,
       },
       {
         type: 2,
         style: ButtonStyle.DANGER,
-        custom_id: `${ADMIN_LIST_PREFIX}${encodeState({ page: 1 })}`,
+        custom_id: `${ADMIN_LIST_PREFIX}${encodeState({ page: 1 })}&_=reset`,
         label: '🔄 フィルタ解除',
       },
     ],
   };
 
   return [
-    selectMenu(`${ADMIN_LIST_PREFIX}select`, 'status を変更…', statusOptions),
-    selectMenu(`${ADMIN_LIST_PREFIX}select`, 'kind を変更…', kindOptions),
-    selectMenu(`${ADMIN_LIST_PREFIX}select`, 'slot を変更…', slotOptions),
+    selectMenu(`${ADMIN_LIST_PREFIX}select:status`, 'status を変更…', statusOptions),
+    selectMenu(`${ADMIN_LIST_PREFIX}select:kind`, 'kind を変更…', kindOptions),
+    selectMenu(`${ADMIN_LIST_PREFIX}select:slot`, 'slot を変更…', slotOptions),
     navRow,
   ];
 }

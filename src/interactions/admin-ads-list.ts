@@ -56,7 +56,9 @@ export async function handleAdminAdsListButton(
   }
   const cid = payload.data.custom_id;
   let state: AdminListState;
-  if (cid === `${ADMIN_LIST_PREFIX}select`) {
+  // Select menus now use `adlist:select:<dim>` to keep custom_ids unique within
+  // the message; the chosen option's value still carries the full encoded state.
+  if (cid.startsWith(`${ADMIN_LIST_PREFIX}select`)) {
     const value = payload.data.values?.[0];
     state = value ? decodeState(value) : { page: 1 };
   } else if (cid.startsWith(ADMIN_LIST_PREFIX)) {
