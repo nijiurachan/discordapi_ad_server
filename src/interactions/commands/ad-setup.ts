@@ -51,15 +51,22 @@ const CHANNEL_KEY: Record<MenuKind, string> = {
 function formatRulesSummary(rules: FormatRules): string {
   const lines: string[] = [`### 📐 入稿ルール（slot=${rules.slot}）`];
   lines.push(`• 形式: ${rules.allowedMimes.join(', ')}`);
+  // Collapse min/max into a single value when they match (strict-size slot),
+  // otherwise render as a range. Falls back to '?' for half-defined rules so
+  // it's clear which side is unbounded.
+  const fmtRange = (min: number | null, max: number | null): string => {
+    if (min != null && max != null && min === max) return String(min);
+    return `${min ?? '?'}–${max ?? '?'}`;
+  };
   const hasSize =
     rules.minWidth != null ||
     rules.maxWidth != null ||
     rules.minHeight != null ||
     rules.maxHeight != null;
   if (hasSize) {
-    const w = `${rules.minWidth ?? '?'}–${rules.maxWidth ?? '?'}`;
-    const h = `${rules.minHeight ?? '?'}–${rules.maxHeight ?? '?'}`;
-    lines.push(`• サイズ: ${w} × ${h} px`);
+    lines.push(
+      `• サイズ: ${fmtRange(rules.minWidth, rules.maxWidth)} × ${fmtRange(rules.minHeight, rules.maxHeight)} px`,
+    );
   }
   lines.push(`• ファイル: 最大 ${(rules.maxBytes / 1024 / 1024).toFixed(1)} MB`);
   if (rules.aspectRatios && rules.aspectRatios.length > 0) {
