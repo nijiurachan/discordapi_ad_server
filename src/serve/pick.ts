@@ -73,9 +73,7 @@ export async function pickHouseAds(
   // we have anything to exclude; skip the clause entirely when empty so we
   // don't emit `NOT IN ()` (a syntax error).
   const excludeClause =
-    excludeIds.length > 0
-      ? `AND id NOT IN (${excludeIds.map(() => '?').join(',')})`
-      : '';
+    excludeIds.length > 0 ? `AND id NOT IN (${excludeIds.map(() => '?').join(',')})` : '';
   const res = await client.query<RawAdRow>(
     `SELECT id, kind, title, body, link_url, image_key
        FROM ads
