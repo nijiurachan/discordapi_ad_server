@@ -88,6 +88,106 @@ serveRouter.get('/serve', async (c) => {
 // the Worker is intentionally not in the image path. See buildPublicImageUrl.
 serveRouter.get('/click/:adId', handleClick);
 
+// Minimal HTML demo so an integrator can eyeball the full flow end-to-end
+// (image render → click redirect → 302 to ad.link_url). Uses /ads/serve under
+// the hood, so it exercises the same code path as a real third-party embed
+// would. Not behind site-key — public test page.
+serveRouter.get('/demo', (c) => {
+  const slot = c.req.query('slot') ?? 'default';
+  const html = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>バナー広告デモ (slot=${slot})</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 960px; margin: 32px auto; padding: 0 16px; line-height: 1.5; color: #1f2328; }
+  h1 { font-size: 18px; margin: 0 0 16px; }
+  .meta { color: #6e7781; font-size: 13px; margin-bottom: 24px; }
+  .banner { display: inline-block; border: 1px solid #d0d7de; border-radius: 8px; padding: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .banner img { display: block; max-width: 100%; height: auto; }
+  .ad-meta { margin-top: 16px; padding: 12px; background: #f6f8fa; border-radius: 6px; font-size: 13px; }
+  .ad-meta strong { color: #0969da; }
+  pre { background: #f6f8fa; border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 12px; }
+  .err { color: #cf222e; padding: 12px; border-left: 4px solid #cf222e; background: #ffebe9; }
+  button { margin-top: 8px; padding: 6px 12px; border: 1px solid #d0d7de; background: #f6f8fa; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #eaeef2; }
+</style>
+</head>
+<body>
+<h1>📣 バナー広告デモ <small>(slot=<code>${slot}</code>)</small></h1>
+<p class="meta">クライアント側で <code>/ads/serve?slot=${slot}&n=1</code> を叩いて画像を描画 → クリックで <code>/ads/click/{id}</code> 経由 302 リダイレクト。impression は配信時に自動計上、click はリダイレクト時に計上。</p>
+<div id="root">読込中…</div>
+<button onclick="location.reload()">🔄 リロード（別の広告を引きたい時）</button>
+<script>
+(async () => {
+  const root = document.getElementById('root');
+  // Helpers — no innerHTML with interpolated values anywhere. Title/body/etc
+  // come from /ads/serve which echoes user-submitted Discord text; treat as
+  // untrusted and route through textContent. Image / click URLs are
+  // server-generated but we still check scheme defensively.
+  const showError = (msg) => {
+    root.replaceChildren();
+    const p = document.createElement('p');
+    p.className = 'err';
+    p.textContent = msg;
+    root.appendChild(p);
+  };
+  const safeHttpUrl = (raw) => {
+    try {
+      const u = new URL(raw, location.origin);
+      return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : '';
+    } catch { return ''; }
+  };
+  const el = (tag, props, ...children) => {
+    const node = document.createElement(tag);
+    if (props) for (const k in props) {
+      if (k === 'className') node.className = props[k];
+      else if (k === 'text') node.textContent = props[k];
+      else node.setAttribute(k, props[k]);
+    }
+    for (const c of children) if (c) node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    return node;
+  };
+
+  try {
+    const res = await fetch('/ads/serve?slot=${slot}&n=1', { headers: { 'accept': 'application/json' } });
+    if (res.status === 204) { showError('配信対象の広告がありません (204)'); return; }
+    if (!res.ok) { showError('/ads/serve エラー (' + res.status + ')'); return; }
+    const data = await res.json();
+    const ad = data.ads && data.ads[0];
+    if (!ad) { showError('広告 0 件'); return; }
+
+    const clickHref = safeHttpUrl(ad.click_url);
+    const imgSrc = safeHttpUrl(ad.image_url);
+    if (!clickHref || !imgSrc) { showError('URL スキーム不正 (https のみ受理)'); return; }
+
+    const img = el('img', { alt: String(ad.title ?? '') });
+    img.src = imgSrc;
+    const anchor = el('a', { className: 'banner', target: '_blank', rel: 'noopener' }, img);
+    anchor.href = clickHref;
+
+    const metaDiv = el('div', { className: 'ad-meta' },
+      el('div', null, el('strong', { text: String(ad.title ?? '') }), ' — ', String(ad.body ?? '')),
+      el('div', null, 'kind: ', el('code', { text: String(ad.kind ?? '') }), ' / ad_id: ', el('code', { text: String(ad.id ?? '') })),
+      el('div', null, 'click_url: ', el('code', { text: clickHref })),
+    );
+
+    const details = el('details', { style: 'margin-top:16px' },
+      el('summary', { text: 'レスポンス全文' }),
+      el('pre', { text: JSON.stringify(data, null, 2) }),
+    );
+
+    root.replaceChildren(anchor, metaDiv, details);
+  } catch (e) {
+    showError('fetch 失敗: ' + (e && e.message ? e.message : String(e)));
+  }
+})();
+</script>
+</body>
+</html>`;
+  return c.html(html);
+});
+
 /**
  * Insert one impression row per non-placeholder served ad. Called via
  * `executionCtx.waitUntil` so the response isn't blocked. Errors are swallowed
