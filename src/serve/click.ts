@@ -36,6 +36,10 @@ export async function handleClick(c: Context<{ Bindings: Bindings }>): Promise<R
   const result = await withPgClient(c.env, async (client) => {
     const ad = await getAdLinkUrl(client, adId);
     if (!ad) return null;
+    // No destination on this ad — bail before tracking. The endpoint exists
+    // (so anchors built by integrators stay valid HTTP), but link-less clicks
+    // aren't a meaningful metric and shouldn't count toward analytics.
+    if (!ad.linkUrl) return ad;
 
     // Best-effort tracking — failures must not block the redirect.
     const method = c.req.method;
@@ -67,11 +71,10 @@ export async function handleClick(c: Context<{ Bindings: Bindings }>): Promise<R
   if (!result) {
     return c.text('not found', 404);
   }
-  // link_url is optional at submit time. If the sponsor uploaded an ad without
-  // a destination, fall through as 410 Gone — frontends shouldn't have surfaced
-  // a click_url in that case, so getting here means a stale anchor.
+  // No-destination ads: return 204 so the new tab opened by target="_blank"
+  // shows a blank page rather than an error. User can close it.
   if (!result.linkUrl) {
-    return c.text('no destination', 410);
+    return new Response(null, { status: 204 });
   }
 
   // Server-side redirect to the persisted link_url. Any client-supplied query
