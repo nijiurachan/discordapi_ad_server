@@ -8,7 +8,14 @@ import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { buildPublicImageUrl } from '../../serve/router.ts';
 import { countActiveAds } from '../../sponsors/tier.ts';
-import { copyObject, createS3Client, deleteObject } from '../../storage/s3.ts';
+import {
+  BANNER_OUTPUT_EXT,
+  BANNER_OUTPUT_MIME,
+  BANNER_HEIGHT,
+  BANNER_WIDTH,
+  resizeBanner,
+} from '../../utils/image-resize.ts';
+import { createS3Client, deleteObject, getObject, putObject } from '../../storage/s3.ts';
 import { fetchFormatRules } from '../../validation/rules.ts';
 import { validateBody, validateLinkUrl, validateTitle } from '../../validation/text.ts';
 import { ephemeral } from '../responses.ts';
@@ -139,16 +146,29 @@ export async function runSubmitModal(
 
   // 5. generate ad_id + compute keys (kept outside tx so we can clean up on failure).
   const adId = deps.uuid();
-  const ext = draft.imageKey.split('.').pop() ?? 'bin';
   const stagingKey = draft.imageKey;
-  const finalKey = `ads/${adId}/orig.${ext}`;
+  // Output is always PNG since we re-encode after the photon resize; the
+  // final key extension follows that, not the input MIME.
+  const finalKey = `ads/${adId}/orig.${BANNER_OUTPUT_EXT}`;
 
-  // 6. S3 copy staging → ads/{ad_id}/  (BEFORE the transaction so we don't
-  // hold a pg connection during S3 I/O).
+  // 6. Fetch staging bytes, resize to the fixed 468×60 banner box, PUT the
+  // resized output to the final key. Replaces the previous direct copy so
+  // every approved ad ships at the same display size regardless of upload
+  // resolution — the integrator pins width="468" height="60" and never sees
+  // layout shift between sponsors. (Runs BEFORE the transaction so we don't
+  // hold the DB row through CPU-bound WASM work.)
+  let resizedBytes: Uint8Array;
   try {
-    await copyObject(deps.s3, deps.bucket, stagingKey, finalKey);
+    const src = await getObject(deps.s3, deps.bucket, stagingKey);
+    if (!src) {
+      console.error('submit-modal: staging missing', { stagingKey, adId });
+      return ephemeral(c, '下書き画像が見つかりません。再度起稿してください。');
+    }
+    const rawBytes = new Uint8Array(await new Response(src.body).arrayBuffer());
+    resizedBytes = resizeBanner(rawBytes).bytes;
+    await putObject(deps.s3, deps.bucket, finalKey, resizedBytes, BANNER_OUTPUT_MIME);
   } catch (err) {
-    console.error('submit-modal: S3 copyObject failed', { stagingKey, finalKey, adId, err });
+    console.error('submit-modal: resize/save failed', { stagingKey, finalKey, adId, err });
     return ephemeral(c, '画像の本格保存に失敗しました。再度起稿してください。');
   }
 
@@ -208,10 +228,10 @@ export async function runSubmitModal(
         body,
         linkUrl,
         finalKey,
-        draft.imageMime,
-        draft.imageBytes,
-        draft.imageWidth,
-        draft.imageHeight,
+        BANNER_OUTPUT_MIME,
+        resizedBytes.byteLength,
+        BANNER_WIDTH,
+        BANNER_HEIGHT,
       ],
     );
 
