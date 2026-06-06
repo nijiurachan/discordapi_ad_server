@@ -25,16 +25,16 @@ export async function isRecentEvent(
   eventType: AdEventType,
   windowMs: number = 5 * 60 * 1000,
 ): Promise<boolean> {
-  const intervalSeconds = Math.max(1, Math.round(windowMs / 1000));
-  const res = await client.query<{ exists: boolean }>(
+  // SQLite has no make_interval(); compare against (now-windowMs) in epoch ms.
+  const res = await client.query<{ exists: number }>(
     `SELECT EXISTS (
        SELECT 1 FROM ad_events
         WHERE ad_id = ?
           AND ip_hash = ?
           AND event_type = ?
-          AND ts > (unixepoch() * 1000) - make_interval(secs => ?)
+          AND ts > (unixepoch() * 1000) - ?
      ) AS "exists"`,
-    [adId, ipHash, eventType, intervalSeconds],
+    [adId, ipHash, eventType, windowMs],
   );
   return Boolean(res.rows[0]?.exists);
 }
@@ -50,13 +50,10 @@ export async function insertAdEvent(client: PgClient, args: InsertAdEventArgs): 
 /**
  * Atomically insert an ad event if no recent matching event exists.
  *
- * The recency check + insert run as a single INSERT ... SELECT ... WHERE NOT
- * EXISTS, but under PostgreSQL's default READ COMMITTED isolation two
- * concurrent transactions can both evaluate WHERE NOT EXISTS as true (since
- * neither has committed yet) and both insert — defeating dedup. We serialise
- * concurrent attempts on the same (ad_id, ip_hash, event_type) tuple via a
- * per-key transaction-scoped advisory lock. The lock is released
- * automatically on COMMIT/ROLLBACK.
+ * Single INSERT ... SELECT ... WHERE NOT EXISTS statement. In D1 / SQLite the
+ * database is single-shard with SERIALIZABLE-like isolation per statement, so
+ * the read inside WHERE NOT EXISTS and the INSERT happen as one atomic step —
+ * no advisory lock or transaction needed (unlike the original Postgres impl).
  *
  * Returns { ok: false, reason: 'duplicate' } when the dedup window suppresses
  * the insert.
@@ -66,43 +63,32 @@ export async function insertEventIfNotRecent(
   args: InsertAdEventArgs,
   windowMs: number = 5 * 60 * 1000,
 ): Promise<InsertEventResult> {
-  const intervalSeconds = Math.max(1, Math.round(windowMs / 1000));
-  // Pipe is safe as a separator: adId is a UUID and ipHash is hex, neither
-  // contains a pipe naturally.
-  const lockKey = `${args.adId}|${args.ipHash}|${args.eventType}`;
+  // SQLite has no make_interval(); compare against (now - windowMs) in epoch ms.
+  const res = await client.query<{ id: string | number }>(
+    `INSERT INTO ad_events (ad_id, event_type, ip_hash, ua, slot)
+     SELECT ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM ad_events
+         WHERE ad_id = ?
+           AND ip_hash = ?
+           AND event_type = ?
+           AND ts > (unixepoch() * 1000) - ?
+      )
+     RETURNING id`,
+    [
+      args.adId,
+      args.eventType,
+      args.ipHash,
+      args.ua,
+      args.slot,
+      args.adId,
+      args.ipHash,
+      args.eventType,
+      windowMs,
+    ],
+  );
 
-  await client.query('BEGIN');
-  try {
-    // hashtextextended(text, bigint seed) returns bigint, exactly what
-    // pg_advisory_xact_lock(bigint) wants. Computing the hash server-side
-    // means the worker doesn't need its own 64-bit hash function.
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [lockKey]);
-
-    const res = await client.query<{ id: string }>(
-      `INSERT INTO ad_events (ad_id, event_type, ip_hash, ua, slot)
-       SELECT ?, ?, ?, ?, ?
-        WHERE NOT EXISTS (
-          SELECT 1 FROM ad_events
-           WHERE ad_id = ?
-             AND ip_hash = ?
-             AND event_type = ?
-             AND ts > (unixepoch() * 1000) - make_interval(secs => ?)
-        )
-       RETURNING id`,
-      [args.adId, args.eventType, args.ipHash, args.ua, args.slot, intervalSeconds],
-    );
-
-    await client.query('COMMIT');
-
-    const row = res.rows[0];
-    if (!row) return { ok: false, reason: 'duplicate' };
-    return { ok: true, insertedId: BigInt(row.id) };
-  } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      /* ignore */
-    }
-    throw err;
-  }
+  const row = res.rows[0];
+  if (!row) return { ok: false, reason: 'duplicate' };
+  return { ok: true, insertedId: BigInt(row.id) };
 }
