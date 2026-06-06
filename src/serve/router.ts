@@ -93,7 +93,13 @@ serveRouter.get('/click/:adId', handleClick);
 // the hood, so it exercises the same code path as a real third-party embed
 // would. Not behind site-key — public test page.
 serveRouter.get('/demo', (c) => {
-  const slot = c.req.query('slot') ?? 'default';
+  // Strict allowlist: slot is interpolated into both HTML attributes and the
+  // inline <script> body. Anything outside [A-Za-z0-9_-] (or longer than 64
+  // chars) gets clamped to 'default' rather than escaped, since slot is also
+  // matched server-side against the ad_format_rules table — exotic strings
+  // can't resolve to a real slot anyway.
+  const rawSlot = c.req.query('slot') ?? 'default';
+  const slot = /^[A-Za-z0-9_-]{1,64}$/.test(rawSlot) ? rawSlot : 'default';
   const html = `<!doctype html>
 <html lang="ja">
 <head>
