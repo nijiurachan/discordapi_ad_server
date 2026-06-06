@@ -1,5 +1,4 @@
 import {
-  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
@@ -52,17 +51,20 @@ export async function copyObject(
   sourceKey: string,
   destKey: string,
 ): Promise<void> {
-  await client.send(
-    new CopyObjectCommand({
-      Bucket: bucket,
-      // The AWS SDK requires CopySource to be URL-encoded. Our keys are
-      // UUID-based and safe today, but encoding defensively means future
-      // changes to key shape (e.g., user-provided slugs) won't silently
-      // break. encodeURIComponent percent-encodes "/" as "%2F", which the
-      // SDK accepts.
-      CopySource: encodeURIComponent(`${bucket}/${sourceKey}`),
-      Key: destKey,
-    }),
+  // The S3 CopyObject response is an XML <CopyObjectResult> body which the
+  // AWS SDK deserializes via DOMParser — unavailable in Cloudflare workerd
+  // ("ReferenceError: DOMParser is not defined"). Stream the bytes through
+  // the Worker as GET + PUT instead. Capped by the format-rules maxBytes
+  // (1 MB for the default slot), so memory cost stays bounded.
+  const src = await getObject(client, bucket, sourceKey);
+  if (!src) throw new Error(`copyObject: source not found (${sourceKey})`);
+  const bodyBytes = new Uint8Array(await new Response(src.body).arrayBuffer());
+  await putObject(
+    client,
+    bucket,
+    destKey,
+    bodyBytes,
+    src.contentType ?? 'application/octet-stream',
   );
 }
 
