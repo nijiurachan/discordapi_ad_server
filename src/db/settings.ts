@@ -14,11 +14,20 @@ export async function getSystemSetting<T = unknown>(
   client: PgClient,
   key: string,
 ): Promise<T | null> {
-  const res = await client.query<{ value: T }>(
-    'SELECT value FROM system_settings WHERE key = $1 LIMIT 1',
+  // `value` is JSON text in D1/SQLite (was jsonb in Postgres). Parse on read
+  // so callers see the same `{ ... }` / primitive shape as before. Strings
+  // that aren't valid JSON return null defensively.
+  const res = await client.query<{ value: string | null }>(
+    'SELECT value FROM system_settings WHERE key = ? LIMIT 1',
     [key],
   );
-  return res.rows[0]?.value ?? null;
+  const raw = res.rows[0]?.value;
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
 }
 
 export async function setSystemSetting<T>(
@@ -29,15 +38,15 @@ export async function setSystemSetting<T>(
 ): Promise<void> {
   await client.query(
     `INSERT INTO system_settings (key, value, updated_at, updated_by)
-       VALUES ($1, $2::jsonb, now(), $3)
+       VALUES (?, ?, (unixepoch() * 1000), ?)
      ON CONFLICT (key) DO UPDATE
        SET value = EXCLUDED.value,
-           updated_at = now(),
+           updated_at = (unixepoch() * 1000),
            updated_by = EXCLUDED.updated_by`,
     [key, JSON.stringify(value), updatedBy],
   );
 }
 
 export async function deleteSystemSetting(client: PgClient, key: string): Promise<void> {
-  await client.query('DELETE FROM system_settings WHERE key = $1', [key]);
+  await client.query('DELETE FROM system_settings WHERE key = ?', [key]);
 }

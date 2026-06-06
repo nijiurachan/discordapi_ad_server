@@ -37,7 +37,7 @@ export async function getSponsorAds(
     `SELECT id, slot, title, body, link_url, image_key, image_mime,
             status, weight_snapshot, created_at, starts_at, ends_at
        FROM ads
-      WHERE sponsor_id = $1
+      WHERE sponsor_id = ?
       ORDER BY
         CASE status
           WHEN 'pending'   THEN 1
@@ -49,7 +49,7 @@ export async function getSponsorAds(
           ELSE 7
         END,
         created_at DESC
-      LIMIT $2`,
+      LIMIT ?`,
     [sponsorId, limit],
   );
   return res.rows.map((r) => ({
@@ -82,7 +82,7 @@ export async function withdrawAd(
   await client.query('BEGIN');
   try {
     const lockRes = await client.query<{ sponsor_id: string | null; status: string }>(
-      'SELECT sponsor_id, status FROM ads WHERE id = $1 FOR UPDATE',
+      'SELECT sponsor_id, status FROM ads WHERE id = ?',
       [adId],
     );
     const row = lockRes.rows[0];
@@ -101,13 +101,13 @@ export async function withdrawAd(
     await client.query(
       `UPDATE ads
           SET status = 'withdrawn',
-              ends_at = now()
-        WHERE id = $1`,
+              ends_at = (unixepoch() * 1000)
+        WHERE id = ?`,
       [adId],
     );
     await client.query(
       `INSERT INTO review_logs (ad_id, reviewer_id, action, reason)
-       VALUES ($1, $2, 'withdrawn', 'sponsor self-withdraw')`,
+       VALUES (?, ?, 'withdrawn', 'sponsor self-withdraw')`,
       [adId, sponsorId],
     );
     await client.query('COMMIT');
@@ -131,10 +131,12 @@ export type AggregateStats = {
 
 export type StatsPeriod = '24h' | '7d' | '30d' | 'all';
 
-const PERIOD_INTERVAL: Record<StatsPeriod, string | null> = {
-  '24h': '24 hours',
-  '7d': '7 days',
-  '30d': '30 days',
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const PERIOD_MS: Record<StatsPeriod, number | null> = {
+  '24h': 24 * HOUR_MS,
+  '7d': 7 * DAY_MS,
+  '30d': 30 * DAY_MS,
   all: null,
 };
 
@@ -143,7 +145,7 @@ const PERIOD_INTERVAL: Record<StatsPeriod, string | null> = {
  *
  * Note: queries `ad_events` directly (not the daily-bucketed `ad_stats_daily`
  * view) because the `24h` / `7d` / `30d` periods are rolling windows from
- * `now()`, and the view's `date_trunc('day', ts)` would round to whole-day
+ * `(unixepoch() * 1000)`, and the view's `date_trunc('day', ts)` would round to whole-day
  * buckets — losing intra-day events near the boundary.
  *
  * The view remains useful for genuine daily reports (admin dashboards in P6).
@@ -153,24 +155,25 @@ export async function getAggregateStats(
   sponsorId: string,
   period: StatsPeriod,
 ): Promise<AggregateStats> {
-  const interval = PERIOD_INTERVAL[period];
-  // The interval string is hardcoded against a known finite set above; it is
-  // never user input, so inlining it into the SQL is safe.
-  const tsCondition = interval ? `AND e.ts >= now() - interval '${interval}'` : '';
+  const windowMs = PERIOD_MS[period];
+  // Compute the rolling-window cutoff in JS — SQLite has no `interval` literal.
+  // The cutoff is passed as a parameter so the SQL plan stays cacheable.
+  const tsCondition = windowMs !== null ? 'AND e.ts >= ?' : '';
+  const params: unknown[] = windowMs !== null ? [Date.now() - windowMs, sponsorId] : [sponsorId];
   const res = await client.query<{
     impressions: string;
     clicks: string;
     ad_count: string;
   }>(
     `SELECT
-       COUNT(*) FILTER (WHERE e.event_type = 'impression')::text AS impressions,
-       COUNT(*) FILTER (WHERE e.event_type = 'click')::text       AS clicks,
-       COUNT(DISTINCT a.id)::text                                  AS ad_count
+       COUNT(*) FILTER (WHERE e.event_type = 'impression') AS impressions,
+       COUNT(*) FILTER (WHERE e.event_type = 'click')       AS clicks,
+       COUNT(DISTINCT a.id)                                  AS ad_count
      FROM ads a
      LEFT JOIN ad_events e ON e.ad_id = a.id ${tsCondition}
-     WHERE a.sponsor_id = $1
+     WHERE a.sponsor_id = ?
        AND a.kind <> 'placeholder'`,
-    [sponsorId],
+    params,
   );
   const row = res.rows[0];
   const impressions = Number(row?.impressions ?? '0');

@@ -43,7 +43,6 @@ function buildEnv(): Bindings {
     FALLBACK_CHANNEL_CATEGORY_ID: 'cat',
     REVIEWER_ROLE_ID,
     ADMIN_ROLE_ID: 'admin-role',
-    POSTGRES_URL: 'postgres://x',
     S3_ENDPOINT: 'https://s3',
     S3_REGION: 'us-east-1',
     S3_BUCKET: 'b',
@@ -55,6 +54,7 @@ function buildEnv(): Bindings {
     WORKER_BASE_URL: 'https://worker.example',
     SERVE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    DB: {} as D1Database,
   };
 }
 

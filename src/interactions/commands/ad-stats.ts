@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { type StatsPeriod, getAggregateStats } from '../../db/queries/ads.ts';
 import type {
   ApplicationCommandInteractionPayload,
@@ -71,7 +71,7 @@ export async function handleAdStatsCommand(
   const period: StatsPeriod = (ALLOWED_PERIODS as readonly string[]).includes(periodRaw)
     ? (periodRaw as StatsPeriod)
     : '7d';
-  return withPgClient(resolveDbUrl(c.env), (client) => runAdStats(c, userId, period, { client }));
+  return withPgClient(c.env, (client) => runAdStats(c, userId, period, { client }));
 }
 
 export async function handleAdStatsButton(
@@ -87,9 +87,7 @@ export async function handleAdStatsButton(
     return periodSelectMenuResponse(c);
   }
   if ((ALLOWED_PERIODS as readonly string[]).includes(tail)) {
-    return withPgClient(resolveDbUrl(c.env), (client) =>
-      runAdStats(c, userId, tail as StatsPeriod, { client }),
-    );
+    return withPgClient(c.env, (client) => runAdStats(c, userId, tail as StatsPeriod, { client }));
   }
   return ephemeral(c, '不明な統計期間です');
 }

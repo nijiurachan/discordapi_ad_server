@@ -12,7 +12,7 @@ export type AdminLogEntry = {
 export async function writeAdminLog(client: PgClient, entry: AdminLogEntry): Promise<void> {
   await client.query(
     `INSERT INTO admin_logs (actor_id, action, target_kind, target_id, before, after)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
     [
       entry.actorId,
       entry.action,

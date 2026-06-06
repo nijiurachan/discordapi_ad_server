@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { insertReviewLog, updateAdStatusOptimistic } from '../../db/queries/review.ts';
 import { buildReviewOutcomeEmbed } from '../../discord/embeds/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
@@ -39,7 +39,7 @@ async function fetchAdForOutcome(client: PgClient, adId: string): Promise<AdForO
     `SELECT id, slot, title, body, link_url, sponsor_id, review_message_id,
             image_key, image_mime
        FROM ads
-      WHERE id = $1`,
+      WHERE id = ?`,
     [adId],
   );
   const row = res.rows[0];
@@ -242,7 +242,7 @@ export async function handleRejectModal(
 ): Promise<Response> {
   const env = c.env;
   const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-  return withPgClient(resolveDbUrl(env), (client) =>
+  return withPgClient(env, (client) =>
     runRejectModal(c, payload, {
       rest,
       client,

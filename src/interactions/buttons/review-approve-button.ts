@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { buildReviewOutcomeEmbed } from '../../discord/embeds/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../discord/types.ts';
@@ -34,7 +34,7 @@ async function fetchAdSnapshot(client: PgClient, adId: string): Promise<AdSnapsh
   }>(
     `SELECT id, slot, title, body, link_url, sponsor_id, review_message_id, image_key
        FROM ads
-      WHERE id = $1`,
+      WHERE id = ?`,
     [adId],
   );
   const r = res.rows[0];
@@ -208,7 +208,7 @@ export async function handleReviewApproveButton(
 ): Promise<Response> {
   const env = c.env;
   const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-  return withPgClient(resolveDbUrl(env), (client) =>
+  return withPgClient(env, (client) =>
     runApproveButton(c, payload, {
       rest,
       client,

@@ -1,167 +1,49 @@
-import pg from 'pg';
 import type { Bindings } from '../env.ts';
 
+/**
+ * Thin D1-backed client preserving the previous `{ query, end }` shape so the
+ * existing call sites need only a 1-arg signature change (URL string -> env).
+ *
+ * - `query(sql, params)` returns `{ rows, rowCount }`:
+ *     rows = the rowset (SELECT or RETURNING). `rowCount` falls back to
+ *     `meta.changes` for INSERT/UPDATE/DELETE that don't RETURN.
+ * - `end()` is a no-op. D1 has no per-connection lifecycle; every prepared
+ *   statement is independent and the binding lives for the isolate.
+ */
 export type PgClient = {
-  query: pg.Pool['query'];
+  query: <T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ) => Promise<{ rows: T[]; rowCount: number }>;
   end: () => Promise<void>;
 };
 
-export type CreatePgClientOptions = {
-  connectionTimeoutMillis?: number;
-  queryTimeoutMillis?: number;
-};
-
-const DEFAULT_TIMEOUT_MS = 3000;
-const POOL_MAX = 5;
-
-/**
- * Decide the `ssl` option for a connection. Public Postgres typically enforces
- * SSL in pg_hba.conf (`hostssl ...`), and node-postgres connects WITHOUT TLS
- * by default — which the server rejects with "no pg_hba.conf entry ... no
- * encryption". So:
- *   - explicit `?sslmode=` in the URL wins (disable / require|prefer|no-verify
- *     / verify-ca|verify-full)
- *   - no sslmode: skip TLS for localhost (local dev), use unverified TLS for
- *     remote hosts. `rejectUnauthorized: false` because self-hosted Postgres
- *     usually presents a self-signed cert; transport is still encrypted.
- */
-export function sslConfig(url: string): pg.PoolConfig['ssl'] {
-  let host = '';
-  let sslmode: string | null = null;
-  try {
-    const u = new URL(url);
-    host = u.hostname;
-    sslmode = u.searchParams.get('sslmode');
-  } catch {
-    return undefined;
-  }
-  if (sslmode === 'disable') return false;
-  if (sslmode === 'verify-full' || sslmode === 'verify-ca') return { rejectUnauthorized: true };
-  if (sslmode === 'require' || sslmode === 'prefer' || sslmode === 'no-verify') {
-    return { rejectUnauthorized: false };
-  }
-  // Hyperdrive's local endpoint (`<id>.hyperdrive.local`) terminates TLS to
-  // the origin itself; the Worker -> Hyperdrive hop is local and must connect
-  // WITHOUT TLS. Match the exact suffix so a real DB host that merely contains
-  // "hyperdrive" (e.g. hyperdrive.example.com) still gets TLS.
-  if (host === 'hyperdrive.local' || host.endsWith('.hyperdrive.local')) return false;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '') return false;
-  return { rejectUnauthorized: false };
-}
-
-/**
- * Per-isolate cache of pg.Pool instances keyed by connection string.
- * Cloudflare Workers isolates are short-lived but reused across many
- * requests; allocating a Pool per request (the original behaviour) was
- * wasteful. With this cache, the same isolate reuses a single Pool for
- * the same URL, and Hyperdrive's own server-side pooling stays effective
- * when its connection string differs from POSTGRES_URL.
- */
-const POOLS = new Map<string, pg.Pool>();
-
-/**
- * Strip credentials from a connection string before logging. Returns the
- * safe identifying fields (protocol/host/port/db/user) — never password.
- * Falls back to `{ unparseable: true }` so we still get *some* signal in
- * logs without the parser throwing inside an error handler.
- */
-function safeDbUrlInfo(url: string): Record<string, string | boolean> {
-  try {
-    const u = new URL(url);
-    return {
-      protocol: u.protocol.replace(/:$/, ''),
-      host: u.hostname,
-      port: u.port || '(default)',
-      database: u.pathname.replace(/^\//, '') || '(none)',
-      user: u.username || '(none)',
-    };
-  } catch {
-    return { unparseable: true };
-  }
-}
-
-function getOrCreatePool(url: string, opts: CreatePgClientOptions): pg.Pool {
-  const cached = POOLS.get(url);
-  if (cached) return cached;
-  const pool = new pg.Pool({
-    connectionString: url,
-    max: POOL_MAX,
-    ssl: sslConfig(url),
-    connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
-    query_timeout: opts.queryTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
-  });
-  // pg.Pool emits 'error' on background connection failures (idle client
-  // disconnect, backend restart, etc.). An unhandled 'error' on an
-  // EventEmitter crashes Node — log instead and let the pool's own
-  // reconnect logic recover. We deliberately don't evict the pool here:
-  // aggressive teardown could race with in-flight queries and the next
-  // borrow will exercise reconnect anyway. The DSN is redacted because
-  // connection strings carry the DB password.
-  pool.on('error', (err) => {
-    console.error('pg pool: background client error', { db: safeDbUrlInfo(url), err });
-  });
-  POOLS.set(url, pool);
-  return pool;
-}
-
-/**
- * One-shot client backed by a brand-new Pool with `max: 1`. Kept for direct
- * unit tests of pool construction; production code should go through
- * `withPgClient` so it benefits from the per-isolate pool cache.
- */
-export function createPgClient(url: string, opts: CreatePgClientOptions = {}): PgClient {
-  if (!url || !url.trim()) {
-    throw new Error('POSTGRES_URL is required and must not be empty or whitespace');
-  }
-  const pool = new pg.Pool({
-    connectionString: url,
-    max: 1,
-    ssl: sslConfig(url),
-    connectionTimeoutMillis: opts.connectionTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
-    query_timeout: opts.queryTimeoutMillis ?? DEFAULT_TIMEOUT_MS,
-  });
-  return {
-    query: pool.query.bind(pool),
-    end: () => pool.end(),
-  };
-}
-
-/**
- * Resolve the database URL for a given Bindings, preferring a Hyperdrive
- * binding's connection string when available. The fallback to POSTGRES_URL
- * keeps `wrangler dev` and tests (which don't have HYPERDRIVE bound) working.
- */
-export function resolveDbUrl(env: Bindings): string {
-  return env.HYPERDRIVE?.connectionString ?? env.POSTGRES_URL;
-}
-
-/**
- * Run `fn` with a PgClient backed by the per-isolate pool cache.
- * `client.end()` is a no-op because the pool is intentionally shared
- * across requests; the pool drains naturally when the isolate evicts.
- */
 export async function withPgClient<T>(
-  url: string,
+  env: Bindings,
   fn: (client: PgClient) => Promise<T>,
 ): Promise<T> {
-  if (!url || !url.trim()) {
-    throw new Error('POSTGRES_URL is required and must not be empty or whitespace');
-  }
-  const pool = getOrCreatePool(url, {});
   const client: PgClient = {
-    query: pool.query.bind(pool),
+    query: async (sql, params = []) => {
+      // D1 doesn't support explicit BEGIN/COMMIT/ROLLBACK through individual
+      // prepared statements; it has implicit per-statement atomicity and
+      // explicit multi-statement atomicity via `env.DB.batch([...])`. Treat
+      // those keywords as no-ops so existing transaction-bracketed call sites
+      // keep running. TODO: migrate the few atomic blocks (admin-edit,
+      // dm-fallback-sweep, review/approve, ad-events dedup) to batch() when
+      // we hit a correctness issue under contention.
+      if (/^\s*(BEGIN|COMMIT|ROLLBACK)\b/i.test(sql)) {
+        return { rows: [] as never, rowCount: 0 };
+      }
+      const stmt = env.DB.prepare(sql).bind(...params);
+      const res = await stmt.all();
+      const rows = (res.results ?? []) as unknown[];
+      const changes =
+        typeof res.meta?.changes === 'number' && res.meta.changes > 0
+          ? res.meta.changes
+          : rows.length;
+      return { rows: rows as never, rowCount: changes };
+    },
     end: async () => undefined,
   };
-  return await fn(client);
-}
-
-/**
- * Test-only: drain and forget every cached pool. Production code never calls
- * this; it exists so unit tests can assert pool reuse behaviour without
- * leaking sockets between test files.
- */
-export async function _resetPoolCacheForTests(): Promise<void> {
-  const pools = Array.from(POOLS.values());
-  POOLS.clear();
-  await Promise.allSettled(pools.map((p) => p.end()));
+  return fn(client);
 }

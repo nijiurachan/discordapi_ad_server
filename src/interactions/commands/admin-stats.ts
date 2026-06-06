@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { type StatsPeriod, getTopAdsStats } from '../../db/queries/admin-stats.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
 import type { ApplicationCommandInteractionPayload, CommandOption } from '../../discord/types.ts';
@@ -95,7 +95,7 @@ export async function handleAdminStats(
     accessKeyId: c.env.S3_ACCESS_KEY_ID,
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(resolveDbUrl(c.env), (client) =>
+  return withPgClient(c.env, (client) =>
     runAdminStats(c, payload, {
       client,
       s3,

@@ -33,7 +33,7 @@ describe('updateAdStatusOptimistic', () => {
     });
     expect(result).toEqual({ ok: true, rowsAffected: 1 });
     expect(captured).toHaveLength(1);
-    expect(first(captured).sql).toBe('UPDATE ads SET status = $3 WHERE id = $1 AND status = $2');
+    expect(first(captured).sql).toBe('UPDATE ads SET status = ? WHERE id = ? AND status = ?');
     expect(first(captured).params).toEqual(['ad-1', 'pending', 'approved']);
   });
 
@@ -46,11 +46,11 @@ describe('updateAdStatusOptimistic', () => {
       reviewedBy: 'reviewer-1',
     });
     const sql = first(captured).sql;
-    expect(sql).toContain('status = $3');
-    expect(sql).toContain('reject_reason = $4');
-    expect(sql).toContain('reviewed_by = $5');
+    expect(sql).toContain('status = ?');
+    expect(sql).toContain('reject_reason = ?');
+    expect(sql).toContain('reviewed_by = ?');
     expect(sql).toContain('reviewed_at = now()');
-    expect(sql).toContain('WHERE id = $1 AND status = $2');
+    expect(sql).toContain('WHERE id = ? AND status = ?');
     expect(first(captured).params).toEqual(['ad-1', 'pending', 'rejected', 'spam', 'reviewer-1']);
   });
 
@@ -65,8 +65,8 @@ describe('updateAdStatusOptimistic', () => {
     });
     const sql = first(captured).sql;
     expect(sql).toContain('starts_at = now()');
-    // starts_at literal should not consume a parameter slot — weight_snapshot follows reviewed_by ($4)
-    expect(sql).toContain('weight_snapshot = $5');
+    // starts_at literal should not consume a parameter slot — weight_snapshot follows reviewed_by (?)
+    expect(sql).toContain('weight_snapshot = ?');
     expect(first(captured).params).toEqual(['ad-1', 'pending', 'approved', 'reviewer-1', 10]);
   });
 
@@ -95,7 +95,7 @@ describe('updateAdStatusOptimistic', () => {
       startsAt: startDate,
     });
     const sql = first(captured).sql;
-    expect(sql).toContain('starts_at = $4');
+    expect(sql).toContain('starts_at = ?');
     expect(first(captured).params).toEqual(['ad-1', 'pending', 'approved', startDate]);
   });
 
@@ -107,7 +107,7 @@ describe('updateAdStatusOptimistic', () => {
       rejectReason: null,
     });
     const sql = first(captured).sql;
-    expect(sql).toContain('reject_reason = $4');
+    expect(sql).toContain('reject_reason = ?');
     expect(first(captured).params).toEqual(['ad-1', 'rejected', 'approved', null]);
   });
 });
@@ -143,7 +143,7 @@ describe('setAdReviewMessageId', () => {
     const client = mockClient(1, captured);
     await setAdReviewMessageId(client, 'ad-1', 'msg-42');
     expect(captured).toHaveLength(1);
-    expect(first(captured).sql).toContain('UPDATE ads SET review_message_id = $1 WHERE id = $2');
+    expect(first(captured).sql).toContain('UPDATE ads SET review_message_id = ? WHERE id = ?');
     expect(first(captured).params).toEqual(['msg-42', 'ad-1']);
   });
 });

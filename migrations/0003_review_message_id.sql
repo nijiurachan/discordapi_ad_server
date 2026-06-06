@@ -1,1 +1,0 @@
-ALTER TABLE "ads" ADD COLUMN "review_message_id" text;

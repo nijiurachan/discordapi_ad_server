@@ -39,9 +39,9 @@ export async function findActiveFallback(
   const res = await client.query<FallbackDbRow>(
     `SELECT id, ad_id, sponsor_id, channel_id, created_at, expires_at, acknowledged_at
        FROM dm_fallback_channels
-      WHERE ad_id = $1
+      WHERE ad_id = ?
         AND acknowledged_at IS NULL
-        AND expires_at > now()
+        AND expires_at > (unixepoch() * 1000)
       ORDER BY created_at DESC
       LIMIT 1`,
     [adId],
@@ -63,7 +63,7 @@ export async function createFallbackRow(
 ): Promise<void> {
   await client.query(
     `INSERT INTO dm_fallback_channels (id, ad_id, sponsor_id, channel_id, expires_at)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES (?, ?, ?, ?, ?)`,
     [args.id, args.adId, args.sponsorId, args.channelId, args.expiresAt],
   );
 }
@@ -77,7 +77,7 @@ export async function findFallbackById(
   const res = await client.query<FallbackDbRow>(
     `SELECT id, ad_id, sponsor_id, channel_id, created_at, expires_at, acknowledged_at
        FROM dm_fallback_channels
-      WHERE id = $1
+      WHERE id = ?
       LIMIT 1`,
     [fallbackId],
   );
@@ -91,7 +91,7 @@ export async function markFallbackAcknowledged(
   fallbackId: string,
 ): Promise<void> {
   await client.query(
-    'UPDATE dm_fallback_channels SET acknowledged_at = now() WHERE id = $1 AND acknowledged_at IS NULL',
+    'UPDATE dm_fallback_channels SET acknowledged_at = (unixepoch() * 1000) WHERE id = ? AND acknowledged_at IS NULL',
     [fallbackId],
   );
 }

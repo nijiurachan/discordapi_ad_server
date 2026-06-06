@@ -26,7 +26,7 @@ describe('sweepAdEvents', () => {
     for (const c of captured) {
       expect(c.sql).toMatch(/DELETE FROM ad_events/);
       expect(c.sql).toMatch(/180 days/);
-      expect(c.sql).toMatch(/LIMIT \$1/);
+      expect(c.sql).toMatch(/LIMIT \?/);
       expect(c.params).toEqual([1000]);
     }
   });

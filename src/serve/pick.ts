@@ -33,9 +33,9 @@ function mapRow(r: RawAdRow): ServedAd {
 
 const ACTIVE_FILTER = `
   status = 'approved'
-  AND slot = $1
-  AND (starts_at IS NULL OR starts_at <= now())
-  AND (ends_at IS NULL OR ends_at > now())
+  AND slot = ?
+  AND (starts_at IS NULL OR starts_at <= (unixepoch() * 1000))
+  AND (ends_at IS NULL OR ends_at > (unixepoch() * 1000))
 `;
 
 export async function pickRegularAds(
@@ -56,7 +56,7 @@ export async function pickRegularAds(
      SELECT id, kind, title, body, link_url, image_key
        FROM candidates
       ORDER BY -ln(random()) / weight_snapshot ASC
-      LIMIT $2`,
+      LIMIT ?`,
     [slot, n],
   );
   return res.rows.map(mapRow);
@@ -69,15 +69,22 @@ export async function pickHouseAds(
   excludeIds: string[],
 ): Promise<ServedAd[]> {
   if (n <= 0) return [];
+  // SQLite has no `ALL(array)` operator. Build a dynamic NOT IN list when
+  // we have anything to exclude; skip the clause entirely when empty so we
+  // don't emit `NOT IN ()` (a syntax error).
+  const excludeClause =
+    excludeIds.length > 0
+      ? `AND id NOT IN (${excludeIds.map(() => '?').join(',')})`
+      : '';
   const res = await client.query<RawAdRow>(
     `SELECT id, kind, title, body, link_url, image_key
        FROM ads
       WHERE ${ACTIVE_FILTER}
         AND kind = 'house'
-        AND id <> ALL($2::uuid[])
+        ${excludeClause}
       ORDER BY random()
-      LIMIT $3`,
-    [slot, excludeIds, n],
+      LIMIT ?`,
+    [slot, ...excludeIds, n],
   );
   return res.rows.map(mapRow);
 }

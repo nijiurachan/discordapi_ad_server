@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type {
@@ -138,7 +138,7 @@ export async function runAdminSubmit(
   if (kind === 'regular') {
     await deps.client.query(
       `INSERT INTO sponsors (discord_user_id, display_name)
-         VALUES ($1, $2)
+         VALUES (?, ?)
        ON CONFLICT (discord_user_id) DO NOTHING`,
       [sponsorIdForDraft, actorName],
     );
@@ -160,8 +160,8 @@ export async function runAdminSubmit(
          (id, sponsor_id, slot, image_key, image_mime, image_bytes,
           image_width, image_height, kind, weight, auto_approve,
           ends_in_days, created_by_admin, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-         now() + interval '10 minutes')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+         (unixepoch() * 1000) + interval '10 minutes')`,
       [
         draftId,
         sponsorIdForDraft,
@@ -252,7 +252,7 @@ export async function handleAdminSubmit(
     accessKeyId: c.env.S3_ACCESS_KEY_ID,
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
-  return withPgClient(resolveDbUrl(c.env), (client) =>
+  return withPgClient(c.env, (client) =>
     runAdminSubmit(c, payload, {
       client,
       rest,

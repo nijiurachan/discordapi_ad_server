@@ -29,10 +29,10 @@ export async function isRecentEvent(
   const res = await client.query<{ exists: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM ad_events
-        WHERE ad_id = $1
-          AND ip_hash = $2
-          AND event_type = $3
-          AND ts > now() - make_interval(secs => $4)
+        WHERE ad_id = ?
+          AND ip_hash = ?
+          AND event_type = ?
+          AND ts > (unixepoch() * 1000) - make_interval(secs => ?)
      ) AS "exists"`,
     [adId, ipHash, eventType, intervalSeconds],
   );
@@ -42,7 +42,7 @@ export async function isRecentEvent(
 export async function insertAdEvent(client: PgClient, args: InsertAdEventArgs): Promise<void> {
   await client.query(
     `INSERT INTO ad_events (ad_id, event_type, ip_hash, ua, slot)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES (?, ?, ?, ?, ?)`,
     [args.adId, args.eventType, args.ipHash, args.ua, args.slot],
   );
 }
@@ -76,19 +76,19 @@ export async function insertEventIfNotRecent(
     // hashtextextended(text, bigint seed) returns bigint, exactly what
     // pg_advisory_xact_lock(bigint) wants. Computing the hash server-side
     // means the worker doesn't need its own 64-bit hash function.
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [lockKey]);
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [lockKey]);
 
     const res = await client.query<{ id: string }>(
       `INSERT INTO ad_events (ad_id, event_type, ip_hash, ua, slot)
-       SELECT $1, $2, $3, $4, $5
+       SELECT ?, ?, ?, ?, ?
         WHERE NOT EXISTS (
           SELECT 1 FROM ad_events
-           WHERE ad_id = $1
-             AND ip_hash = $3
-             AND event_type = $2
-             AND ts > now() - make_interval(secs => $6)
+           WHERE ad_id = ?
+             AND ip_hash = ?
+             AND event_type = ?
+             AND ts > (unixepoch() * 1000) - make_interval(secs => ?)
         )
-       RETURNING id::text`,
+       RETURNING id`,
       [args.adId, args.eventType, args.ipHash, args.ua, args.slot, intervalSeconds],
     );
 

@@ -23,19 +23,19 @@ const EMBED_COLOR = 0x5865f2;
 export async function collectHealthStats(client: PgClient): Promise<HealthSummaryStats> {
   const [activeAdsRes, pendingRes, saltRes] = await Promise.all([
     client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count
+      `SELECT COUNT(*) AS count
          FROM ads
         WHERE status = 'approved'
-          AND (starts_at IS NULL OR starts_at <= now())
-          AND (ends_at   IS NULL OR ends_at   >  now())`,
+          AND (starts_at IS NULL OR starts_at <= (unixepoch() * 1000))
+          AND (ends_at   IS NULL OR ends_at   >  (unixepoch() * 1000))`,
     ),
     client.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count
+      `SELECT COUNT(*) AS count
          FROM dm_fallback_channels
         WHERE acknowledged_at IS NULL`,
     ),
     client.query<{ updated_at: Date | string | null }>(
-      'SELECT updated_at FROM system_settings WHERE key = $1 LIMIT 1',
+      'SELECT updated_at FROM system_settings WHERE key = ? LIMIT 1',
       [SystemSettingKey.IP_HASH_SALT],
     ),
   ]);

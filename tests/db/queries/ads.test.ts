@@ -62,7 +62,7 @@ describe('getSponsorAds', () => {
       endsAt: null,
     });
     expect(captured[0]?.sql).toMatch(/FROM ads/);
-    expect(captured[0]?.sql).toMatch(/WHERE sponsor_id = \$1/);
+    expect(captured[0]?.sql).toMatch(/WHERE sponsor_id = \?/);
     expect(captured[0]?.params).toEqual(['user-1', 5]);
   });
 

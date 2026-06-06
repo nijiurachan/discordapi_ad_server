@@ -24,7 +24,7 @@ export async function updateAdStatusOptimistic(
   fromStatus: AdStatus,
   patch: StatusUpdatePatch,
 ): Promise<StatusUpdateResult> {
-  const sets: string[] = ['status = $3'];
+  const sets: string[] = ['status = ?'];
   const params: unknown[] = [adId, fromStatus, patch.status];
   let i = 4;
   if (Object.hasOwn(patch, 'rejectReason')) {
@@ -32,12 +32,12 @@ export async function updateAdStatusOptimistic(
     params.push(patch.rejectReason);
   }
   if (Object.hasOwn(patch, 'reviewedBy')) {
-    sets.push(`reviewed_by = $${i++}`, 'reviewed_at = now()');
+    sets.push(`reviewed_by = $${i++}`, 'reviewed_at = (unixepoch() * 1000)');
     params.push(patch.reviewedBy);
   }
   if (Object.hasOwn(patch, 'startsAt')) {
     if (patch.startsAt === 'now') {
-      sets.push('starts_at = now()');
+      sets.push('starts_at = (unixepoch() * 1000)');
     } else {
       sets.push(`starts_at = $${i++}`);
       params.push(patch.startsAt);
@@ -47,7 +47,7 @@ export async function updateAdStatusOptimistic(
     sets.push(`weight_snapshot = $${i++}`);
     params.push(patch.weightSnapshot);
   }
-  const sql = `UPDATE ads SET ${sets.join(', ')} WHERE id = $1 AND status = $2`;
+  const sql = `UPDATE ads SET ${sets.join(', ')} WHERE id = ? AND status = ?`;
   const res = await client.query(sql, params);
   const rowsAffected = res.rowCount ?? 0;
   if (rowsAffected === 0) return { ok: false, reason: 'race' };
@@ -63,7 +63,7 @@ export async function insertReviewLog(
 ): Promise<void> {
   await client.query(
     `INSERT INTO review_logs (ad_id, reviewer_id, action, reason)
-     VALUES ($1, $2, $3, $4)`,
+     VALUES (?, ?, ?, ?)`,
     [adId, reviewerId, action, reason ?? null],
   );
 }
@@ -73,5 +73,5 @@ export async function setAdReviewMessageId(
   adId: string,
   messageId: string,
 ): Promise<void> {
-  await client.query('UPDATE ads SET review_message_id = $1 WHERE id = $2', [messageId, adId]);
+  await client.query('UPDATE ads SET review_message_id = ? WHERE id = ?', [messageId, adId]);
 }

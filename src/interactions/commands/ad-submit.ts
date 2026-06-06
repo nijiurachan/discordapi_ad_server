@@ -1,6 +1,6 @@
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { Context } from 'hono';
-import { type PgClient, resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { type PgClient, withPgClient } from '../../db/client.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type {
   ApplicationCommandInteractionPayload,
@@ -189,7 +189,7 @@ export async function runAdSubmit(
       `INSERT INTO ad_drafts
          (id, sponsor_id, slot, image_key, image_mime, image_bytes,
           image_width, image_height, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now() + interval '10 minutes')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, (unixepoch() * 1000) + interval '10 minutes')`,
       [
         draftId,
         userId,
@@ -289,7 +289,7 @@ export async function handleAdSubmit(
     secretAccessKey: c.env.S3_SECRET_ACCESS_KEY,
   });
 
-  return withPgClient(resolveDbUrl(c.env), (client) =>
+  return withPgClient(c.env, (client) =>
     runAdSubmit(c, payload, {
       client,
       rest,

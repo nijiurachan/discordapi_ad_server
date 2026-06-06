@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { resolveDbUrl, withPgClient } from '../../db/client.ts';
+import { withPgClient } from '../../db/client.ts';
 import { writeAdminLog } from '../../db/queries/admin-logs.ts';
 import { upsertAdFormatRules } from '../../db/queries/format-rules.ts';
 import { isAdmin } from '../../discord/admin-auth.ts';
@@ -104,7 +104,7 @@ export async function handleAdminRulesSubmitModal(
   }
 
   const actorId = payload.member?.user?.id ?? payload.user?.id ?? 'unknown';
-  await withPgClient(resolveDbUrl(c.env), async (client) => {
+  await withPgClient(c.env, async (client) => {
     await upsertAdFormatRules(client, result.value, actorId);
     await writeAdminLog(client, {
       actorId,

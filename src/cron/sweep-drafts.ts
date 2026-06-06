@@ -26,7 +26,7 @@ export async function sweepExpiredDrafts(
   bucket: string,
 ): Promise<SweepDraftsResult> {
   const del = await client.query<{ id: string; image_key: string }>(
-    'DELETE FROM ad_drafts WHERE expires_at < now() RETURNING id, image_key',
+    'DELETE FROM ad_drafts WHERE expires_at < (unixepoch() * 1000) RETURNING id, image_key',
   );
   let s3Failed = 0;
   for (const row of del.rows) {

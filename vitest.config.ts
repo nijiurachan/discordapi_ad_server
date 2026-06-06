@@ -20,7 +20,6 @@ export default defineWorkersConfig({
             FALLBACK_CHANNEL_CATEGORY_ID: '4',
             REVIEWER_ROLE_ID: '5',
             ADMIN_ROLE_ID: '6',
-            POSTGRES_URL: 'postgres://localhost/test',
             S3_ENDPOINT: 'http://localhost:9000',
             S3_REGION: 'us-east-1',
             S3_BUCKET: 'test',
@@ -32,6 +31,7 @@ export default defineWorkersConfig({
             WORKER_BASE_URL: 'http://localhost:8787',
             TEST_OVERRIDE_ALLOWED: 'true',
           },
+          d1Databases: ['DB'],
           ratelimits: {
             SERVE_RATE_LIMITER: { simple: { limit: 60, period: 60 } },
             CLICK_RATE_LIMITER: { simple: { limit: 10, period: 60 } },

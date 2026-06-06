@@ -47,7 +47,7 @@ export async function upsertTier(
   try {
     await client.query(
       `INSERT INTO tiers (discord_role_id, name, weight, max_active_ads, rank)
-         VALUES ($1, $2, $3, $4, $5)
+         VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (discord_role_id) DO UPDATE SET
          name = EXCLUDED.name,
          weight = EXCLUDED.weight,
@@ -71,8 +71,8 @@ export async function upsertTier(
 export async function deleteTier(client: PgClient, tierId: number): Promise<TierMutationError> {
   const res = await client.query<{ id: number }>(
     `DELETE FROM tiers
-       WHERE id = $1
-         AND NOT EXISTS (SELECT 1 FROM sponsors WHERE current_tier_id = $1)
+       WHERE id = ?
+         AND NOT EXISTS (SELECT 1 FROM sponsors WHERE current_tier_id = ?)
      RETURNING id`,
     [tierId],
   );
