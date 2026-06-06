@@ -34,7 +34,7 @@
       "title": "あいもげFANBOX",
       "body": "同上",
       "image_url": "https://storage.nijiurachan.net/discordads/ads/ae82.../orig.png",
-      "click_url": "https://ads.nijiurachan.net/ads/click/ae82...",
+      "click_url": "https://ads.nijiurachan.net/ads/click/ae82...",  // null の可能性あり
       "impression_token": "v1...."  // 現状はサーバが受信時に計上するため、クライアントは保存不要
     }
   ]
@@ -44,6 +44,8 @@
 ```
 
 返ってきた `image_url` と `click_url` をそのまま使うだけで OK。**impression は `/ads/serve` を叩いた時点でサーバが記録するので、フロント側で追加の通信は不要**。クリックは `click_url` (= `/ads/click/:adId`) にアクセスされた瞬間に 302 リダイレクト + click 計上が走る。
+
+> ⚠ **`click_url` は `null` の可能性あり** — スポンサーがリンク URL を空欄で起稿した広告は「リンク無し広告」として配信されます。実装時は `click_url` が truthy のときだけ `<a>` で包んでください（下記サンプルは対応済み）。
 
 ### `GET /ads/click/:adId`
 
@@ -83,21 +85,26 @@ const safeHttpUrl = (raw) => {
   if (res.status === 204) return;
   const ad = (await res.json()).ads?.[0];
   if (!ad) return;
-  const href = safeHttpUrl(ad.click_url);
   const src = safeHttpUrl(ad.image_url);
-  if (!href || !src) return; // 不正スキームは無音で破棄
-  const a = document.createElement('a');
-  a.href = href;
-  a.target = '_blank';
-  a.rel = 'noopener sponsored';
+  if (!src) return; // 画像が不正スキームなら無音で破棄
+  const href = ad.click_url ? safeHttpUrl(ad.click_url) : '';
   const img = document.createElement('img');
   img.src = src;
-  img.alt = ad.title; // 属性経由なので XSS 化しない
+  img.alt = ad.title;
   img.loading = 'lazy';
   img.style.maxWidth = '100%';
   img.style.height = 'auto';
-  a.appendChild(img);
-  document.getElementById('bmg-banner').appendChild(a);
+  let node;
+  if (href) {
+    node = document.createElement('a');
+    node.href = href;
+    node.target = '_blank';
+    node.rel = 'noopener sponsored';
+    node.appendChild(img);
+  } else {
+    node = img; // リンク無し広告は素の img だけ
+  }
+  document.getElementById('bmg-banner').appendChild(node);
 })();
 </script>
 ```
@@ -117,7 +124,7 @@ type Ad = {
   title: string;
   body: string;
   image_url: string;
-  click_url: string;
+  click_url: string | null; // リンク無し広告では null
 };
 
 function safeHttpUrl(raw: string): string {
@@ -143,19 +150,16 @@ export function BmgBanner({ slot = 'default' }: { slot?: string }) {
   }, [slot]);
 
   if (!ad) return null;
-  const href = safeHttpUrl(ad.click_url);
   const src = safeHttpUrl(ad.image_url);
-  if (!href || !src) return null;
-  return (
-    <a href={href} target="_blank" rel="noopener sponsored">
-      <img
-        src={src}
-        alt={ad.title}
-        loading="lazy"
-        style={{ maxWidth: '100%', height: 'auto' }}
-      />
-    </a>
+  if (!src) return null;
+  const href = ad.click_url ? safeHttpUrl(ad.click_url) : '';
+  const img = (
+    <img src={src} alt={ad.title} loading="lazy"
+         style={{ maxWidth: '100%', height: 'auto' }} />
   );
+  return href ? (
+    <a href={href} target="_blank" rel="noopener sponsored">{img}</a>
+  ) : img;
 }
 ```
 
@@ -172,7 +176,7 @@ const safeHttpUrl = (raw: string) => {
     return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : '';
   } catch { return ''; }
 };
-const href = computed(() => (ad.value ? safeHttpUrl(ad.value.click_url) : ''));
+const href = computed(() => (ad.value && ad.value.click_url ? safeHttpUrl(ad.value.click_url) : ''));
 const src = computed(() => (ad.value ? safeHttpUrl(ad.value.image_url) : ''));
 onMounted(async () => {
   const r = await fetch(`https://ads.nijiurachan.net/ads/serve?slot=${props.slot ?? 'default'}&n=1`);
@@ -182,9 +186,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <a v-if="ad && href && src" :href="href" target="_blank" rel="noopener sponsored">
-    <img :src="src" :alt="ad.title" loading="lazy" style="max-width:100%;height:auto" />
-  </a>
+  <template v-if="ad && src">
+    <a v-if="href" :href="href" target="_blank" rel="noopener sponsored">
+      <img :src="src" :alt="ad.title" loading="lazy" style="max-width:100%;height:auto" />
+    </a>
+    <img v-else :src="src" :alt="ad.title" loading="lazy" style="max-width:100%;height:auto" />
+  </template>
 </template>
 ```
 
@@ -214,14 +221,13 @@ async function getAd(slot = 'default') {
 export async function BmgBanner({ slot }: { slot?: string }) {
   const ad = await getAd(slot);
   if (!ad) return null;
-  const href = safeHttpUrl(ad.click_url);
   const src = safeHttpUrl(ad.image_url);
-  if (!href || !src) return null;
-  return (
-    <a href={href} target="_blank" rel="noopener sponsored">
-      <img src={src} alt={ad.title} loading="lazy" />
-    </a>
-  );
+  if (!src) return null;
+  const href = ad.click_url ? safeHttpUrl(ad.click_url) : '';
+  const img = <img src={src} alt={ad.title} loading="lazy" />;
+  return href ? (
+    <a href={href} target="_blank" rel="noopener sponsored">{img}</a>
+  ) : img;
 }
 ```
 
@@ -271,16 +277,22 @@ async function loadBanner(slot, mountId) {
   if (r.status === 204) return;
   const ad = (await r.json()).ads?.[0];
   if (!ad) return;
-  const href = safeHttpUrl(ad.click_url);
   const src = safeHttpUrl(ad.image_url);
-  if (!href || !src) return;
-  const a = Object.assign(document.createElement('a'), {
-    href, target: '_blank', rel: 'noopener sponsored',
-  });
-  a.appendChild(Object.assign(document.createElement('img'), {
+  if (!src) return;
+  const href = ad.click_url ? safeHttpUrl(ad.click_url) : '';
+  const img = Object.assign(document.createElement('img'), {
     src, alt: ad.title, loading: 'lazy',
-  }));
-  document.getElementById(mountId).appendChild(a);
+  });
+  let node;
+  if (href) {
+    node = Object.assign(document.createElement('a'), {
+      href, target: '_blank', rel: 'noopener sponsored',
+    });
+    node.appendChild(img);
+  } else {
+    node = img;
+  }
+  document.getElementById(mountId).appendChild(node);
 }
 loadBanner('default', 'bmg-1');
 loadBanner('default', 'bmg-2');

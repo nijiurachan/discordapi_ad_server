@@ -25,7 +25,10 @@ export function validateBody(rules: FormatRules, body: string): TextValidationRe
 }
 
 export function validateLinkUrl(rules: FormatRules, urlStr: string): TextValidationResult {
-  if (urlStr.length === 0) return { ok: false, error: 'リンク URL を入力してください' };
+  // Link is optional — empty string means "no clickable destination". The ad
+  // still serves and counts impressions; the response just omits click_url so
+  // frontend integrations render the image without an <a> wrapper.
+  if (urlStr.length === 0) return { ok: true };
   if (urlStr.length > rules.linkUrlMaxLen) {
     return {
       ok: false,

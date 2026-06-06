@@ -18,18 +18,27 @@ export function buildReviewEmbed(
   ad: ReviewEmbedAd,
   sponsor: ReviewEmbedSponsor,
 ): Record<string, unknown> {
+  // Link is optional. When missing, omit both the embed top-level `url` (which
+  // Discord rejects when empty) and the "リンク URL" field (Discord rejects
+  // fields with empty `value`). The image still shows; sponsor still tagged.
+  const hasLink = ad.linkUrl.length > 0;
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: '本文', value: ad.body.slice(0, 1024), inline: false },
+  ];
+  if (hasLink) {
+    fields.push({ name: 'リンク URL', value: ad.linkUrl.slice(0, 1024), inline: false });
+  }
+  fields.push(
+    { name: 'スロット', value: ad.slot, inline: true },
+    { name: 'スポンサー', value: `<@${sponsor.id}>`, inline: true },
+    { name: '広告 ID', value: `\`${ad.id}\``, inline: false },
+  );
   return {
     title: '📥 新しい広告審査依頼',
-    url: ad.linkUrl,
+    ...(hasLink ? { url: ad.linkUrl } : {}),
     description: `**${ad.title}**`,
     color: 0x3498db, // blue
-    fields: [
-      { name: '本文', value: ad.body.slice(0, 1024), inline: false },
-      { name: 'リンク URL', value: ad.linkUrl.slice(0, 1024), inline: false },
-      { name: 'スロット', value: ad.slot, inline: true },
-      { name: 'スポンサー', value: `<@${sponsor.id}>`, inline: true },
-      { name: '広告 ID', value: `\`${ad.id}\``, inline: false },
-    ],
+    fields,
     timestamp: new Date().toISOString(),
     ...(ad.imageUrl ? { image: { url: ad.imageUrl } } : {}),
   };
@@ -49,18 +58,23 @@ export function buildReviewOutcomeEmbed(
   const titleIcon = isApproved ? '✅' : isWithdrawn ? '↩' : '❌';
   const titleVerb = isApproved ? '承認済' : isWithdrawn ? '取り下げ' : '却下';
   const color = isApproved ? 0x2ecc71 : isWithdrawn ? 0x95a5a6 : 0xe74c3c;
+  const hasLink = ad.linkUrl.length > 0;
   const fields: Array<{ name: string; value: string; inline?: boolean }> = [
     { name: '本文', value: ad.body.slice(0, 1024), inline: false },
-    { name: 'リンク URL', value: ad.linkUrl.slice(0, 1024), inline: false },
+  ];
+  if (hasLink) {
+    fields.push({ name: 'リンク URL', value: ad.linkUrl.slice(0, 1024), inline: false });
+  }
+  fields.push(
     { name: 'スロット', value: ad.slot, inline: true },
     { name: 'スポンサー', value: `<@${sponsor.id}>`, inline: true },
     { name: '広告 ID', value: `\`${ad.id}\``, inline: false },
     { name: 'レビュアー', value: `<@${reviewerId}>`, inline: true },
-  ];
+  );
   if (reason) fields.push({ name: '理由', value: reason.slice(0, 1024), inline: false });
   return {
     title: `${titleIcon} ${titleVerb} by <@${reviewerId}>`,
-    url: ad.linkUrl,
+    ...(hasLink ? { url: ad.linkUrl } : {}),
     description: `**${ad.title}**`,
     color,
     fields,

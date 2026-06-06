@@ -67,6 +67,12 @@ export async function handleClick(c: Context<{ Bindings: Bindings }>): Promise<R
   if (!result) {
     return c.text('not found', 404);
   }
+  // link_url is optional at submit time. If the sponsor uploaded an ad without
+  // a destination, fall through as 410 Gone — frontends shouldn't have surfaced
+  // a click_url in that case, so getting here means a stale anchor.
+  if (!result.linkUrl) {
+    return c.text('no destination', 410);
+  }
 
   // Server-side redirect to the persisted link_url. Any client-supplied query
   // (e.g., ?to=) is intentionally ignored to prevent open-redirect attacks.
