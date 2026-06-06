@@ -3,6 +3,7 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   sqliteView,
@@ -233,6 +234,30 @@ export const dmFallbackChannels = sqliteTable(
     pendingIdx: index('dm_fallback_pending_idx')
       .on(t.expiresAt)
       .where(sql`${t.acknowledgedAt} IS NULL`),
+  }),
+);
+
+/**
+ * Per-(slot, day) shuffled "deck" of approved regular ads, used to deliver the
+ * weight ratio deterministically within a 24h window. `bag` is a JSON array of
+ * ad_ids where each ad appears `weight_snapshot` times; the array order is a
+ * deterministic Fisher-Yates shuffle seeded by `${slot}-${day}`. `cursor`
+ * advances atomically per /serve call; `signature` is a hash of the current
+ * (id, weight) set used to detect mid-day ad changes — when it differs, the
+ * bag is rebuilt and cursor reset.
+ */
+export const serveRotation = sqliteTable(
+  'serve_rotation',
+  {
+    slot: text('slot').notNull(),
+    day: text('day').notNull(),
+    bag: text('bag').notNull(),
+    cursor: integer('cursor').notNull().default(0),
+    signature: text('signature').notNull(),
+    updatedAt: integer('updated_at').notNull().default(NOW_MS),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.slot, t.day] }),
   }),
 );
 
