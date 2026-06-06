@@ -19,7 +19,9 @@ INSERT INTO ad_format_rules (
   '["png","jpg","jpeg","webp"]',
   1048576,
   468, 468, 60, 60,
-  '["39:5"]', 0.02,
+  -- aspect_ratios kept NULL: min=max=W and min=max=H already pin the shape,
+  -- so a separate ratio check would just print noise in the submit menu.
+  NULL, 0.02,
   80, 500, 2048,
   '["https"]',
   (unixepoch() * 1000),
