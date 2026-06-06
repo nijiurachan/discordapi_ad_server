@@ -9,7 +9,6 @@ import {
 import type { Bindings } from '../../env.ts';
 import { handleAdminAdsListEntry } from '../admin-ads-list.ts';
 import { ADMIN_ACTION_MODAL_PREFIX } from '../modals/admin-action-modal.ts';
-import { handleAdminQuickSubmitEntry } from '../modals/admin-quick-submit-modal.ts';
 import { handleAdminRulesEntry } from '../modals/admin-rules-modal.ts';
 import { handleAdminTiersEntry } from '../modals/admin-tiers-modal.ts';
 import { ephemeral } from '../responses.ts';
@@ -84,9 +83,6 @@ export async function handleAdminButton(
   }
   if (id === AdminButtonIds.ADS_LIST) {
     return handleAdminAdsListEntry(c, payload);
-  }
-  if (id === AdminButtonIds.ADS_ADMIN_SUBMIT) {
-    return handleAdminQuickSubmitEntry(c, payload);
   }
   if (id === AdminButtonIds.ADS_EDIT) {
     return c.json({ type: InteractionResponseType.MODAL, data: adIdEditPickModal() });

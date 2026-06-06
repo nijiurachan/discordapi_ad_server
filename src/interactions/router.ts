@@ -34,10 +34,6 @@ import {
   ADMIN_RULES_MODAL_PREFIX,
   handleAdminRulesSubmitModal,
 } from './modals/admin-rules-modal.ts';
-import {
-  ADMIN_QUICK_SUBMIT_PREFIX,
-  handleAdminQuickSubmitModal,
-} from './modals/admin-quick-submit-modal.ts';
 import { handleAdminSubmitModal } from './modals/admin-submit-modal.ts';
 import {
   ADMIN_TIERS_MODAL_PREFIX,
@@ -192,9 +188,6 @@ interactions.post('/', async (c) => {
         }
         if (modalCid.startsWith('admin-submit:')) {
           return handleAdminSubmitModal(c, modal);
-        }
-        if (modalCid.startsWith(ADMIN_QUICK_SUBMIT_PREFIX)) {
-          return handleAdminQuickSubmitModal(c, modal);
         }
         if (modalCid.startsWith('admin-action:')) {
           return handleAdminActionModal(c, modal);
