@@ -84,6 +84,21 @@ export async function handleAdminButton(
   if (id === AdminButtonIds.ADS_LIST) {
     return handleAdminAdsListEntry(c, payload);
   }
+  if (id === AdminButtonIds.ADS_ADMIN_SUBMIT) {
+    // Discord modals can't carry attachments, so admin contribution stays on
+    // the slash-command path. The button just surfaces the usage here.
+    return ephemeral(
+      c,
+      '➕ **管理者として起稿** はスラッシュコマンド経由です。\n\n' +
+        '```\n/admin submit kind:<regular|house|placeholder> slot:default image:<画像添付>\n```\n\n' +
+        '主要オプション：\n' +
+        '• `kind` regular = 通常広告（sponsor_id 必須 or 自分名義）/ house = ハウス広告 / placeholder = 在庫切れ表示\n' +
+        '• `sponsor_id` regular で他人を代理起稿する場合のみ（省略時は自分）\n' +
+        '• `weight` 重み（省略時は kind と tier から自動）\n' +
+        '• `ends_in_days` 配信終了までの日数（1-365、省略で無期限）\n' +
+        '• `auto_approve` true なら審査スキップで即時 approved',
+    );
+  }
   if (id === AdminButtonIds.ADS_EDIT) {
     return c.json({ type: InteractionResponseType.MODAL, data: adIdEditPickModal() });
   }
