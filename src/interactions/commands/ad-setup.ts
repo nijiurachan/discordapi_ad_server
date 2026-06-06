@@ -69,9 +69,6 @@ function formatRulesSummary(rules: FormatRules): string {
   lines.push(
     `• タイトル ≤ ${rules.titleMaxLen} / 本文 ≤ ${rules.bodyMaxLen} / リンク ${rules.linkScheme.join('/')} のみ`,
   );
-  lines.push(
-    '• 🔁 **配信時は 468 × 60 px に自動リサイズ** されます（高解像度入稿は Retina 用ソースとして受理）',
-  );
   return lines.join('\n');
 }
 

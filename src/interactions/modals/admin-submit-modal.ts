@@ -7,14 +7,7 @@ import { postReviewEmbed } from '../../discord/review-embed.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { buildPublicImageUrl } from '../../serve/router.ts';
-import {
-  BANNER_OUTPUT_EXT,
-  BANNER_OUTPUT_MIME,
-  BANNER_HEIGHT,
-  BANNER_WIDTH,
-  resizeBanner,
-} from '../../utils/image-resize.ts';
-import { createS3Client, deleteObject, getObject, putObject } from '../../storage/s3.ts';
+import { copyObject, createS3Client, deleteObject } from '../../storage/s3.ts';
 import { fetchFormatRules } from '../../validation/rules.ts';
 import { validateBody, validateLinkUrl, validateTitle } from '../../validation/text.ts';
 import { ephemeral } from '../responses.ts';
@@ -143,22 +136,13 @@ export async function runAdminSubmitModal(
   if (!linkResult.ok) return ephemeral(c, linkResult.error);
 
   const adId = deps.uuid();
-  // Final extension follows the post-resize PNG output rather than the input
-  // MIME — the bytes stored at finalKey are always the resized PNG.
-  const finalKey = `ads/${adId}/orig.${BANNER_OUTPUT_EXT}`;
+  const ext = draft.imageKey.split('.').pop() ?? 'bin';
+  const finalKey = `ads/${adId}/orig.${ext}`;
 
-  let resizedBytes: Uint8Array;
   try {
-    const src = await getObject(deps.s3, deps.bucket, draft.imageKey);
-    if (!src) {
-      console.error('admin-submit-modal: staging missing', draft.imageKey);
-      return ephemeral(c, '下書き画像が見つかりません。');
-    }
-    const rawBytes = new Uint8Array(await new Response(src.body).arrayBuffer());
-    resizedBytes = resizeBanner(rawBytes).bytes;
-    await putObject(deps.s3, deps.bucket, finalKey, resizedBytes, BANNER_OUTPUT_MIME);
+    await copyObject(deps.s3, deps.bucket, draft.imageKey, finalKey);
   } catch (err) {
-    console.error('admin-submit-modal: resize/save failed', err);
+    console.error('admin-submit-modal: S3 copy failed', err);
     return ephemeral(c, '画像の本格保存に失敗しました。');
   }
 
@@ -237,10 +221,10 @@ export async function runAdminSubmitModal(
         body,
         linkUrl,
         finalKey,
-        BANNER_OUTPUT_MIME,
-        resizedBytes.byteLength,
-        BANNER_WIDTH,
-        BANNER_HEIGHT,
+        draft.imageMime,
+        draft.imageBytes,
+        draft.imageWidth,
+        draft.imageHeight,
         status,
         weightSnapshot,
         isAutoApproved ? draft.createdByAdmin : null,

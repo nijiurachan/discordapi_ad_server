@@ -183,14 +183,7 @@ serveRouter.get('/demo', (c) => {
     const imgSrc = safeHttpUrl(ad.image_url);
     if (!clickHref || !imgSrc) { showError('URL スキーム不正 (https のみ受理)'); return; }
 
-    // Banner is always delivered at 468×60; pin display size to avoid any
-    // layout shift between sponsors of differing source resolutions.
-    const img = el('img', {
-      alt: String(ad.title ?? ''),
-      width: '468',
-      height: '60',
-      style: 'display:block;width:468px;height:60px;',
-    });
+    const img = el('img', { alt: String(ad.title ?? '') });
     img.src = imgSrc;
     const anchor = el('a', { className: 'banner', target: '_blank', rel: 'noopener' }, img);
     anchor.href = clickHref;
