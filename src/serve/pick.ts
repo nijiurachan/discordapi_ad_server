@@ -69,15 +69,22 @@ export async function pickHouseAds(
   excludeIds: string[],
 ): Promise<ServedAd[]> {
   if (n <= 0) return [];
+  // SQLite has no `ALL(array)` operator. Build a dynamic NOT IN list when
+  // we have anything to exclude; skip the clause entirely when empty so we
+  // don't emit `NOT IN ()` (a syntax error).
+  const excludeClause =
+    excludeIds.length > 0
+      ? `AND id NOT IN (${excludeIds.map(() => '?').join(',')})`
+      : '';
   const res = await client.query<RawAdRow>(
     `SELECT id, kind, title, body, link_url, image_key
        FROM ads
       WHERE ${ACTIVE_FILTER}
         AND kind = 'house'
-        AND id <> ALL(?)
+        ${excludeClause}
       ORDER BY random()
       LIMIT ?`,
-    [slot, excludeIds, n],
+    [slot, ...excludeIds, n],
   );
   return res.rows.map(mapRow);
 }

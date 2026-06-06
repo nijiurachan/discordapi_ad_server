@@ -59,7 +59,7 @@ export async function forceEndAd(
   adId: string,
   allowedStatuses: AdStatus[],
 ): Promise<boolean> {
-  const placeholders = allowedStatuses.map((_, i) => `$${i + 2}`).join(',');
+  const placeholders = allowedStatuses.map(() => '?').join(',');
   const res = await client.query(
     `UPDATE ads
         SET status = 'expired',

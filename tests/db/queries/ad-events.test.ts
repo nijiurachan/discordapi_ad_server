@@ -30,10 +30,10 @@ describe('isRecentEvent', () => {
     expect(out).toBe(true);
     expect(captured[0]?.sql).toMatch(/SELECT EXISTS/);
     expect(captured[0]?.sql).toMatch(/FROM ad_events/);
-    expect(captured[0]?.sql).toMatch(/ad_id = \$1/);
-    expect(captured[0]?.sql).toMatch(/ip_hash = \$2/);
-    expect(captured[0]?.sql).toMatch(/event_type = \$3/);
-    expect(captured[0]?.sql).toMatch(/make_interval\(secs => \$4\)/);
+    expect(captured[0]?.sql).toMatch(/ad_id = \?/);
+    expect(captured[0]?.sql).toMatch(/ip_hash = \?/);
+    expect(captured[0]?.sql).toMatch(/event_type = \?/);
+    expect(captured[0]?.sql).toMatch(/make_interval\(secs => \?\)/);
     expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 300]);
   });
 
@@ -126,7 +126,7 @@ describe('insertEventIfNotRecent', () => {
     // The INSERT is the third query (after BEGIN + advisory lock).
     expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
     expect(captured[2]?.sql).toMatch(/WHERE NOT EXISTS/);
-    expect(captured[2]?.sql).toMatch(/make_interval\(secs => \$6\)/);
+    expect(captured[2]?.sql).toMatch(/make_interval\(secs => \?\)/);
     expect(captured[2]?.sql).toMatch(/RETURNING id::text/);
     expect(captured[2]?.params).toEqual([
       'ad-1',

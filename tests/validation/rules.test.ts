@@ -45,7 +45,7 @@ describe('fetchFormatRules', () => {
     expect(rules?.slot).toBe('default');
     expect(captured).toHaveLength(1);
     expect(captured[0]?.sql).toMatch(/FROM ad_format_rules/);
-    expect(captured[0]?.sql).toMatch(/WHERE slot = \$1/);
+    expect(captured[0]?.sql).toMatch(/WHERE slot = \?/);
     expect(captured[0]?.params).toEqual(['default']);
   });
 

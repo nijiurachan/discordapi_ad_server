@@ -36,10 +36,10 @@ describe('listAdminAds', () => {
       10,
     );
     const countSql = captured[0]?.sql ?? '';
-    expect(countSql).toContain('status = $1');
-    expect(countSql).toContain('kind = $2');
-    expect(countSql).toContain('slot = $3');
-    expect(countSql).toContain('sponsor_id = $4');
+    expect(countSql).toContain('status = ?');
+    expect(countSql).toContain('kind = ?');
+    expect(countSql).toContain('slot = ?');
+    expect(countSql).toContain('sponsor_id = ?');
     const countParams = captured[0]?.params ?? [];
     expect(countParams).toEqual(['approved', 'regular', 'default', 'user-1']);
   });

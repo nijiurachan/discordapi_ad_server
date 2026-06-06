@@ -32,7 +32,7 @@ describe('sweepDmFallbackChannels', () => {
     expect(result).toEqual({ selected: 0, channelDeleted: 0, channelGone: 0, failed: 0 });
     expect(rest.deleteChannel).not.toHaveBeenCalled();
     // SELECT is bounded by a batch LIMIT so a long backlog drains across ticks.
-    expect(captured[0]?.sql).toMatch(/LIMIT \$1/);
+    expect(captured[0]?.sql).toMatch(/LIMIT \?/);
     expect(captured[0]?.params).toEqual([100]);
   });
 

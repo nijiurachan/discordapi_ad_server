@@ -67,7 +67,7 @@ describe('runAdList', () => {
     expect(json.data.content).toContain('まだ広告が登録されていません');
     // The SELECT must filter by sponsor_id and bind the invoking user's id.
     expect(captured).toHaveLength(1);
-    expect(captured[0]?.sql).toMatch(/WHERE\s+sponsor_id\s*=\s*\$1/i);
+    expect(captured[0]?.sql).toMatch(/WHERE\s+sponsor_id\s*=\s*\?/i);
     expect(captured[0]?.params?.[0]).toBe('user-42');
   });
 

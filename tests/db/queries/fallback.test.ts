@@ -81,7 +81,7 @@ describe('findFallbackById', () => {
     expect(r?.id).toBe('fb-1');
     expect(r?.adId).toBe('ad-1');
     expect(r?.acknowledgedAt).toBeNull();
-    expect(captured[0]?.sql).toMatch(/WHERE id = \$1/);
+    expect(captured[0]?.sql).toMatch(/WHERE id = \?/);
     expect(captured[0]?.params).toEqual(['fb-1']);
   });
 
@@ -97,7 +97,7 @@ describe('markFallbackAcknowledged', () => {
     const client = mockClient([], captured);
     await markFallbackAcknowledged(client, 'fb-1');
     expect(captured[0]?.sql).toMatch(/UPDATE dm_fallback_channels SET acknowledged_at = now\(\)/);
-    expect(captured[0]?.sql).toMatch(/WHERE id = \$1 AND acknowledged_at IS NULL/);
+    expect(captured[0]?.sql).toMatch(/WHERE id = \? AND acknowledged_at IS NULL/);
     expect(captured[0]?.params).toEqual(['fb-1']);
   });
 });

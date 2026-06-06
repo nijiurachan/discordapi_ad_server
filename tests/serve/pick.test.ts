@@ -73,7 +73,7 @@ describe('pickRegularAds', () => {
     expect(captured[0]?.sql).toMatch(/FROM ads/);
     expect(captured[0]?.sql).toMatch(/kind = 'regular'/);
     expect(captured[0]?.sql).toMatch(/-ln\(random\(\)\) \/ weight_snapshot ASC/);
-    expect(captured[0]?.sql).toMatch(/LIMIT \$2/);
+    expect(captured[0]?.sql).toMatch(/LIMIT \?/);
     expect(captured[0]?.params).toEqual(['default', 3]);
   });
 });
@@ -95,7 +95,7 @@ describe('pickHouseAds', () => {
     expect(res[0]?.kind).toBe('house');
     expect(captured[0]?.sql).toMatch(/kind = 'house'/);
     expect(captured[0]?.sql).toMatch(/ORDER BY random\(\)/);
-    expect(captured[0]?.sql).toMatch(/<> ALL\(\$2::uuid\[\]\)/);
+    expect(captured[0]?.sql).toMatch(/<> ALL\(\?::uuid\[\]\)/);
     expect(captured[0]?.params).toEqual(['default', ['x-1'], 2]);
   });
 });
