@@ -80,11 +80,11 @@ serveRouter.get('/serve', async (c) => {
         title: ad.title,
         body: ad.body,
         image_url: buildPublicImageUrl(c.env.S3_PUBLIC_BASE_URL, ad.imageKey),
-        // Always emit click_url so existing third-party integrations can wrap
-        // every ad in an <a> without conditional logic. Ads with no link_url
-        // get a 204 from the click endpoint — anchor exists but the click is
-        // a no-op (user sees a blank tab they can close).
-        click_url: `${c.env.WORKER_BASE_URL}/ads/click/${ad.id}`,
+        // null for link-less ads so frontends know to render a bare <img>
+        // (no <a> wrapper, no click behavior at all). The 204 path on
+        // /ads/click stays as a safety net for any stale anchor that may
+        // still be in the wild from an earlier deployment.
+        click_url: ad.linkUrl ? `${c.env.WORKER_BASE_URL}/ads/click/${ad.id}` : null,
         impression_token: token,
       };
     }),
@@ -183,19 +183,26 @@ serveRouter.get('/demo', (c) => {
     const ad = data.ads && data.ads[0];
     if (!ad) { showError('広告 0 件'); return; }
 
-    const clickHref = safeHttpUrl(ad.click_url);
     const imgSrc = safeHttpUrl(ad.image_url);
-    if (!clickHref || !imgSrc) { showError('URL スキーム不正 (https のみ受理)'); return; }
+    if (!imgSrc) { showError('URL スキーム不正 (https のみ受理)'); return; }
+    // click_url is null for link-less ads. Render just the <img> in that case
+    // so clicking literally does nothing — no anchor, no blank tab.
+    const clickHref = ad.click_url ? safeHttpUrl(ad.click_url) : '';
 
     const img = el('img', { alt: String(ad.title ?? '') });
     img.src = imgSrc;
-    const anchor = el('a', { className: 'banner', target: '_blank', rel: 'noopener' }, img);
-    anchor.href = clickHref;
+    let banner;
+    if (clickHref) {
+      banner = el('a', { className: 'banner', target: '_blank', rel: 'noopener' }, img);
+      banner.href = clickHref;
+    } else {
+      banner = el('div', { className: 'banner' }, img);
+    }
 
     const metaDiv = el('div', { className: 'ad-meta' },
       el('div', null, el('strong', { text: String(ad.title ?? '') }), ' — ', String(ad.body ?? '')),
       el('div', null, 'kind: ', el('code', { text: String(ad.kind ?? '') }), ' / ad_id: ', el('code', { text: String(ad.id ?? '') })),
-      el('div', null, 'click_url: ', el('code', { text: clickHref })),
+      el('div', null, 'click_url: ', el('code', { text: clickHref || '(なし — リンク無し広告)' })),
     );
 
     const details = el('details', { style: 'margin-top:16px' },
@@ -203,7 +210,7 @@ serveRouter.get('/demo', (c) => {
       el('pre', { text: JSON.stringify(data, null, 2) }),
     );
 
-    root.replaceChildren(anchor, metaDiv, details);
+    root.replaceChildren(banner, metaDiv, details);
   } catch (e) {
     showError('fetch 失敗: ' + (e && e.message ? e.message : String(e)));
   }
