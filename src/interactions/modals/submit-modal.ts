@@ -6,6 +6,7 @@ import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import { postReviewEmbed } from '../../discord/review-embed.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
+import { buildPublicImageUrl } from '../../serve/router.ts';
 import { countActiveAds } from '../../sponsors/tier.ts';
 import { copyObject, createS3Client, deleteObject } from '../../storage/s3.ts';
 import { fetchFormatRules } from '../../validation/rules.ts';
@@ -18,7 +19,7 @@ export type ModalSubmitDeps = {
   s3: S3Client;
   bucket: string;
   reviewChannelId: string;
-  workerBaseUrl: string;
+  s3PublicBaseUrl: string;
   uuid: () => string;
 };
 
@@ -244,11 +245,11 @@ export async function runSubmitModal(
 
   // 9. post review embed (non-fatal: admin can re-trigger if it fails)
   try {
+    const imageUrl = buildPublicImageUrl(deps.s3PublicBaseUrl, finalKey);
     const result = await postReviewEmbed({
       rest: deps.rest,
       channelId: deps.reviewChannelId,
-      workerBaseUrl: deps.workerBaseUrl,
-      ad: { id: adId, slot: draft.slot, title, body, linkUrl, imageExt: ext },
+      ad: { id: adId, slot: draft.slot, title, body, linkUrl, imageUrl },
       sponsor: { id: draft.sponsorId },
     });
     // Persist message_id so P3.2 / P3.3 can edit the same review message.
@@ -290,7 +291,7 @@ export async function handleSubmitModal(
       s3,
       bucket: env.S3_BUCKET,
       reviewChannelId: env.REVIEW_CHANNEL_ID,
-      workerBaseUrl: env.WORKER_BASE_URL,
+      s3PublicBaseUrl: env.S3_PUBLIC_BASE_URL,
       uuid: () => crypto.randomUUID(),
     }),
   );

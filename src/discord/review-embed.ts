@@ -7,7 +7,10 @@ export type ReviewAd = {
   title: string;
   body: string;
   linkUrl: string;
-  imageExt: string;
+  // Fully-qualified URL Discord can fetch. Caller composes via
+  // buildPublicImageUrl(S3_PUBLIC_BASE_URL, imageKey); pass null when the ad
+  // has no image (kind=placeholder, etc.) and the embed omits the image block.
+  imageUrl: string | null;
 };
 
 export type ReviewSponsor = {
@@ -17,7 +20,6 @@ export type ReviewSponsor = {
 export type PostReviewEmbedArgs = {
   rest: DiscordRest;
   channelId: string;
-  workerBaseUrl: string;
   ad: ReviewAd;
   sponsor: ReviewSponsor;
 };
@@ -28,7 +30,6 @@ export type PostReviewEmbedArgs = {
  * (P3.2 / P3.3 update the same message when reviewers act).
  */
 export async function postReviewEmbed(args: PostReviewEmbedArgs): Promise<{ messageId: string }> {
-  const imageUrl = `${args.workerBaseUrl}/images/ads/${args.ad.id}/orig.${args.ad.imageExt}`;
   const embed = buildReviewEmbed(
     {
       id: args.ad.id,
@@ -36,7 +37,7 @@ export async function postReviewEmbed(args: PostReviewEmbedArgs): Promise<{ mess
       title: args.ad.title,
       body: args.ad.body,
       linkUrl: args.ad.linkUrl,
-      imageUrl,
+      ...(args.ad.imageUrl ? { imageUrl: args.ad.imageUrl } : {}),
     },
     { id: args.sponsor.id },
   );

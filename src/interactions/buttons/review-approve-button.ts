@@ -4,6 +4,7 @@ import { buildReviewOutcomeEmbed } from '../../discord/embeds/review.ts';
 import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type { MessageComponentInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
+import { buildPublicImageUrl } from '../../serve/router.ts';
 import { approveAd } from '../../services/review/approve.ts';
 import { sendResultDM } from '../../services/review/dm.ts';
 import { createOrReuseFallbackChannel } from '../../services/review/fallback.ts';
@@ -55,12 +56,16 @@ export type ApproveButtonDeps = {
   rest: DiscordRest;
   client: PgClient;
   reviewChannelId: string;
-  workerBaseUrl: string;
+  s3PublicBaseUrl: string;
   reviewerRoleId: string;
   guildId: string;
   botId: string;
   fallbackCategoryId: string;
   uuid: () => string;
+  // When provided, DM + fallback channel work is fire-and-forget under
+  // c.executionCtx.waitUntil so the modal/button ack stays inside Discord's
+  // 3-second window. Tests omit this and the deferred work is awaited inline.
+  waitUntil?: (p: Promise<unknown>) => void;
 };
 
 /**
@@ -108,63 +113,43 @@ export async function runApproveButton(
     return ephemeral(c, message);
   }
 
-  // Best-effort: edit the original review embed so the channel reflects the
-  // outcome. A failure here doesn't roll back the approval — admins can
-  // re-trigger the embed update manually if needed.
-  if (ad.reviewMessageId && ad.sponsorId) {
-    try {
-      const ext = ad.imageKey?.split('.').pop() ?? 'bin';
-      const imageUrl = `${deps.workerBaseUrl}/images/ads/${ad.id}/orig.${ext}`;
-      const outcomeEmbed = buildReviewOutcomeEmbed(
-        {
-          id: ad.id,
-          slot: ad.slot,
-          title: ad.title,
-          body: ad.body,
-          linkUrl: ad.linkUrl,
-          imageUrl,
-        },
-        { id: ad.sponsorId },
-        'approved',
-        reviewerId,
-      );
-      await deps.rest.editMessage(deps.reviewChannelId, ad.reviewMessageId, {
-        embeds: [outcomeEmbed],
-        components: [],
-      });
-    } catch (err) {
-      console.error('review-approve: embed edit failed (continuing)', err);
+  // Embed edit + DM + fallback channel involve REST hops that can blow past
+  // Discord's 3-second interaction window (we logged 5s+ wallTimes on the DM
+  // path). Run them after returning the ack so the user sees a prompt
+  // "✅ 承認確定" instead of "問題が発生しました". In tests, waitUntil is
+  // absent and the work is awaited inline so assertions still see the side
+  // effects.
+  const deferred = async () => {
+    if (ad.reviewMessageId && ad.sponsorId) {
+      try {
+        const imageUrl = buildPublicImageUrl(deps.s3PublicBaseUrl, ad.imageKey);
+        const outcomeEmbed = buildReviewOutcomeEmbed(
+          {
+            id: ad.id,
+            slot: ad.slot,
+            title: ad.title,
+            body: ad.body,
+            linkUrl: ad.linkUrl,
+            ...(imageUrl ? { imageUrl } : {}),
+          },
+          { id: ad.sponsorId },
+          'approved',
+          reviewerId,
+        );
+        await deps.rest.editMessage(deps.reviewChannelId, ad.reviewMessageId, {
+          embeds: [outcomeEmbed],
+          components: [],
+        });
+      } catch (err) {
+        console.error('review-approve: embed edit failed (continuing)', err);
+      }
     }
-  }
 
-  // Send DM (P3.4); fall back to private channel post when blocked (P3.5).
-  // Note: 'blocked' never surfaces as the final status — the blocked branch
-  // always resolves to either 'fallback_posted' (success) or 'rest_error'
-  // (fallback creation/post failed).
-  let dmStatus: 'sent' | 'no_sponsor' | 'rest_error' | 'fallback_posted' = 'rest_error';
-  if (ad.sponsorId) {
-    const dmResult = await sendResultDM({
-      rest: deps.rest,
-      client: deps.client,
-      ad: {
-        id: ad.id,
-        slot: ad.slot,
-        title: ad.title,
-        weightSnapshot: result.weightSnapshot,
-        startsAt: result.startsAt,
-      },
-      sponsorId: ad.sponsorId,
-      action: 'approved',
-    });
-    if (dmResult.ok) {
-      dmStatus = 'sent';
-    } else if (dmResult.reason === 'blocked') {
-      const fb = await createOrReuseFallbackChannel({
+    if (!ad.sponsorId) return;
+    try {
+      const dmResult = await sendResultDM({
         rest: deps.rest,
         client: deps.client,
-        guildId: deps.guildId,
-        botId: deps.botId,
-        categoryId: deps.fallbackCategoryId,
         ad: {
           id: ad.id,
           slot: ad.slot,
@@ -174,28 +159,41 @@ export async function runApproveButton(
         },
         sponsorId: ad.sponsorId,
         action: 'approved',
-        uuid: deps.uuid,
       });
-      dmStatus = fb.ok ? 'fallback_posted' : 'rest_error';
-    } else if (dmResult.reason === 'no_sponsor') {
-      dmStatus = 'no_sponsor';
-    } else {
-      dmStatus = 'rest_error';
+      if (!dmResult.ok && dmResult.reason === 'blocked') {
+        await createOrReuseFallbackChannel({
+          rest: deps.rest,
+          client: deps.client,
+          guildId: deps.guildId,
+          botId: deps.botId,
+          categoryId: deps.fallbackCategoryId,
+          ad: {
+            id: ad.id,
+            slot: ad.slot,
+            title: ad.title,
+            weightSnapshot: result.weightSnapshot,
+            startsAt: result.startsAt,
+          },
+          sponsorId: ad.sponsorId,
+          action: 'approved',
+          uuid: deps.uuid,
+        });
+      }
+    } catch (err) {
+      console.error('review-approve: DM/fallback failed (deferred)', err);
     }
+  };
+
+  if (deps.waitUntil) {
+    deps.waitUntil(deferred());
   } else {
-    dmStatus = 'no_sponsor';
+    await deferred();
   }
 
-  const dmNote =
-    dmStatus === 'sent'
-      ? 'DM で起稿者に通知しました。'
-      : dmStatus === 'fallback_posted'
-        ? 'DM がオフのためプライベートチャンネルで通知しました。'
-        : dmStatus === 'no_sponsor'
-          ? '（house/placeholder のため DM 送信なし）'
-          : '⚠ DM 送信時にエラーが発生しました（ログ参照）。';
-
-  return ephemeral(c, `✅ 承認を確定しました。weight=${result.weightSnapshot} を凍結。${dmNote}`);
+  return ephemeral(
+    c,
+    `✅ 承認を確定しました。weight=${result.weightSnapshot} を凍結。通知は別途送信します。`,
+  );
 }
 
 /**
@@ -213,12 +211,13 @@ export async function handleReviewApproveButton(
       rest,
       client,
       reviewChannelId: env.REVIEW_CHANNEL_ID,
-      workerBaseUrl: env.WORKER_BASE_URL,
+      s3PublicBaseUrl: env.S3_PUBLIC_BASE_URL,
       reviewerRoleId: env.REVIEWER_ROLE_ID,
       guildId: env.GUILD_ID,
       botId: env.DISCORD_APP_BOT_ID,
       fallbackCategoryId: env.FALLBACK_CHANNEL_CATEGORY_ID,
       uuid: () => crypto.randomUUID(),
+      waitUntil: (p) => c.executionCtx.waitUntil(p),
     }),
   );
 }
