@@ -58,11 +58,14 @@ async function withdrawAllForSponsor(
   reason: string,
   action: string,
 ): Promise<string[]> {
+  // Match the exclusion in the outer iteration: admin-contributed ads never
+  // get auto-withdrawn here even if some future query path lets them in.
   const res = await client.query<{ id: string }>(
     `UPDATE ads
         SET status = 'withdrawn',
             ends_at = (unixepoch() * 1000)
       WHERE sponsor_id = ?
+        AND created_by_admin IS NULL
         AND status IN ('approved', 'pending', 'paused')
      RETURNING id`,
     [sponsorId],
@@ -92,10 +95,13 @@ async function syncWeightForSponsor(
   // Only re-snapshot already-approved (currently-serving) ads. pending ads will
   // pick up the live tier weight at approval time via approveAd; paused ads
   // are held intentionally and shouldn't be touched.
+  // Admin-contributed ads carry an admin-set weight (often manually tuned);
+  // don't clobber it from the sponsor's live tier on every cron run.
   const changed = await client.query<{ id: string; weight_snapshot: number | null }>(
     `SELECT id, weight_snapshot
        FROM ads
       WHERE sponsor_id = ?
+        AND created_by_admin IS NULL
         AND status = 'approved'
         AND (weight_snapshot IS NULL OR weight_snapshot != ?)`,
     [sponsorId, newWeight],
@@ -105,6 +111,7 @@ async function syncWeightForSponsor(
     `UPDATE ads
         SET weight_snapshot = ?
       WHERE sponsor_id = ?
+        AND created_by_admin IS NULL
         AND status = 'approved'
         AND (weight_snapshot IS NULL OR weight_snapshot != ?)`,
     [newWeight, sponsorId, newWeight],
@@ -148,10 +155,16 @@ export async function auditSponsorMembership(
   rest: DiscordRest,
   guildId: string,
 ): Promise<AuditResult> {
+  // Exclude admin-contributed ads (created_by_admin IS NOT NULL). Those are
+  // operations / house promos that share the admin's Discord ID as the
+  // nominal sponsor — but the admin almost never holds a supporter tier role
+  // themselves, so the "lost tier" branch would auto-withdraw them every day.
+  // The membership audit only makes sense against actual paying sponsors.
   const sponsorsRes = await client.query<{ sponsor_id: string }>(
     `SELECT DISTINCT sponsor_id
        FROM ads
       WHERE sponsor_id IS NOT NULL
+        AND created_by_admin IS NULL
         AND status IN ('approved', 'pending', 'paused')`,
   );
 
