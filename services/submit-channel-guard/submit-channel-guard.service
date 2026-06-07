@@ -1,0 +1,24 @@
+[Unit]
+Description=Discord submit-channel-guard (deletes non-command messages in #広告入稿)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=so4246la
+Group=so4246la
+WorkingDirectory=/home/so4246la/discordAPI_ad_server/services/submit-channel-guard
+ExecStart=/usr/local/bin/bun run index.ts
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+# Token-bearing process; reduce blast radius.
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/so4246la/discordAPI_ad_server/services/submit-channel-guard
+
+[Install]
+WantedBy=multi-user.target

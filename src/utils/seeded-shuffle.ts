@@ -67,3 +67,71 @@ export async function sha256Hex(input: string): Promise<string> {
   for (const b of bytes) hex += b.toString(16).padStart(2, '0');
   return hex;
 }
+
+/**
+ * Attempt to swap positions i and j in `arr` and keep the change only when it
+ * does not create any new adjacent duplicate inside the disturbed region
+ * (positions i-1..i+1 and j-1..j+1). Returns true on success.
+ *
+ * Strictly deterministic — used by spreadShuffle as a constraint-aware swap
+ * primitive after a seeded random shuffle. Restores the original values on
+ * rejection so the caller can keep trying alternative `j`s without bookkeeping.
+ */
+function trySwap<T>(arr: T[], i: number, j: number): boolean {
+  if (i === j) return false;
+  const a = arr[i];
+  const b = arr[j];
+  if (a === undefined || b === undefined) return false;
+  if (a === b) return false; // pointless
+  arr[i] = b;
+  arr[j] = a;
+  const positions = new Set([i - 1, i, i + 1, j - 1, j, j + 1]);
+  for (const p of positions) {
+    if (p <= 0 || p >= arr.length) continue;
+    if (arr[p] === arr[p - 1]) {
+      arr[i] = a;
+      arr[j] = b;
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Take an already shuffled deck and "spread" it so the same value never (or
+ * as rarely as possible) appears at consecutive indices. For each consecutive
+ * duplicate `arr[i] === arr[i-1]`, scan forward for the first later position
+ * j where swapping arr[i] with arr[j] removes the local duplicate without
+ * creating a new one anywhere in the swap region. Repeats sweeps until a
+ * full pass makes no swaps (= stable) or MAX_SWEEPS is reached.
+ *
+ * No-consecutive is mathematically achievable iff max(multiplicity) <=
+ * ceil(length / 2). When some value's multiplicity exceeds that bound this
+ * function does its best and leaves the unavoidable residual duplicates in
+ * place — the user-facing trade-off is "as spread as possible".
+ *
+ * Deterministic given the input, so callers can cache the result by deck
+ * identity (we exploit this via the serve_rotation table).
+ */
+export function spreadShuffle<T>(deck: readonly T[]): T[] {
+  if (deck.length <= 1) return deck.slice();
+  const result = deck.slice();
+  // Four passes is plenty: each pass at most halves the residual duplicate
+  // count in the typical case, and the algorithm provably stabilizes (no
+  // swap is accepted unless it strictly reduces a violation).
+  const MAX_SWEEPS = 4;
+  for (let sweep = 0; sweep < MAX_SWEEPS; sweep++) {
+    let swaps = 0;
+    for (let i = 1; i < result.length; i++) {
+      if (result[i] !== result[i - 1]) continue;
+      for (let j = i + 1; j < result.length; j++) {
+        if (trySwap(result, i, j)) {
+          swaps++;
+          break;
+        }
+      }
+    }
+    if (swaps === 0) break;
+  }
+  return result;
+}

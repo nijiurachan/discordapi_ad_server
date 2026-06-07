@@ -1,5 +1,5 @@
 import type { PgClient } from '../db/client.ts';
-import { sha256Hex, seededShuffle } from '../utils/seeded-shuffle.ts';
+import { sha256Hex, seededShuffle, spreadShuffle } from '../utils/seeded-shuffle.ts';
 
 export type AdKind = 'regular' | 'house' | 'placeholder';
 
@@ -53,7 +53,11 @@ async function buildBag(ads: RawWeightedRow[], seed: string): Promise<string[]> 
   for (const a of ads) {
     for (let i = 0; i < a.weight_snapshot; i++) flat.push(a.id);
   }
-  return seededShuffle(flat, seed);
+  // Seeded random first (preserves the weight ratio + per-day variability),
+  // then a constraint pass to push adjacent duplicates apart — so two impressions
+  // back-to-back almost never serve the same ad even when one ad dominates the
+  // weight distribution.
+  return spreadShuffle(await seededShuffle(flat, seed));
 }
 
 /**
