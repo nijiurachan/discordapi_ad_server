@@ -67,6 +67,7 @@ export const ads = sqliteTable(
     imageHeight: integer('image_height'),
     status: text('status').notNull(),
     weightSnapshot: integer('weight_snapshot'),
+    weightAlloc: integer('weight_alloc'),
     rejectReason: text('reject_reason'),
     reviewedBy: text('reviewed_by'),
     reviewedAt: integer('reviewed_at'),
@@ -97,6 +98,14 @@ export const ads = sqliteTable(
     periodCheck: check(
       'ads_period_check',
       sql`${t.startsAt} IS NULL OR ${t.endsAt} IS NULL OR ${t.startsAt} <= ${t.endsAt}`,
+    ),
+    weightAllocPositive: check(
+      'ads_weight_alloc_positive',
+      sql`${t.weightAlloc} IS NULL OR ${t.weightAlloc} > 0`,
+    ),
+    weightSnapshotPositive: check(
+      'ads_weight_snapshot_positive',
+      sql`${t.weightSnapshot} IS NULL OR ${t.weightSnapshot} > 0`,
     ),
     // Partial index: only the approved rows pay the index-maintenance cost.
     activeIdx: index('ads_active_idx')

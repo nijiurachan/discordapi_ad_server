@@ -2,12 +2,9 @@
   "version": "7",
   "dialect": "sqlite",
   "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1780711206468,
-      "tag": "0000_spicy_guardian",
-      "breakpoints": true
-    }
+    { "idx": 0, "version": "6", "when": 1780711206468, "tag": "0000_spicy_guardian", "breakpoints": true },
+    { "idx": 1, "version": "6", "when": 1780711206469, "tag": "0001_ad_stats_daily_view", "breakpoints": true },
+    { "idx": 2, "version": "6", "when": 1780711206470, "tag": "0002_serve_rotation", "breakpoints": true },
+    { "idx": 3, "version": "6", "when": 1780711206471, "tag": "0003_weight_alloc", "breakpoints": true }
   ]
 }

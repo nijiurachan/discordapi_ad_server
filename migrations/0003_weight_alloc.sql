@@ -1,0 +1,19 @@
+-- Phase 1: sponsor weight-split budget.
+--
+-- `weight_alloc` is the sponsor's INTENT (how they choose to split their tier
+-- budget T across banners). regular ads only; default 1; admin/house/placeholder
+-- stay NULL (out of budget). `weight_snapshot` (existing) is the EFFECTIVE deck
+-- weight derived from effectiveWeights(allocs, T) at approve time and on the
+-- nightly cron.
+--
+-- Cross-row budget invariant
+--   Σ weight_alloc over a sponsor's status IN ('pending','approved') regular ads <= T
+-- is NOT expressible as a SQLite CHECK (no cross-row aggregates). It is enforced
+-- in app code under a sponsor-scoped transaction (see ad-submit.ts / submit-modal.ts
+-- / approve.ts). The per-row positivity CHECKs below ARE schema-enforced.
+--
+-- SQLite cannot ADD a column with a CHECK that scans existing rows, and it cannot
+-- ALTER an existing table to add a CHECK at all. We therefore add the column here;
+-- the per-row positivity guards (weight_alloc > 0, weight_snapshot > 0) are encoded
+-- in src/db/schema.ts for new-DB/test creation and asserted in app code on write.
+ALTER TABLE `ads` ADD COLUMN `weight_alloc` INTEGER;
