@@ -130,3 +130,61 @@ export async function applyEffectiveWeights(
     );
   }
 }
+
+export type ApproveOutcome = 'approved' | 'budget_exceeded' | 'race';
+
+/**
+ * Atomic, single-statement conditional approve. D1/SQLite has no interactive
+ * transactions or row locks (the Workers D1 client makes BEGIN/COMMIT no-ops),
+ * so a read-then-write budget check does NOT serialize. SQLite runs ONE
+ * statement atomically and is single-writer, so this conditional UPDATE is the
+ * correct concurrency primitive: it flips pending->approved only when the ad is
+ * still pending AND Σ weight_alloc over the sponsor's OTHER pending/approved
+ * regular non-admin ads, plus this ad's alloc, is still <= the live tier weight.
+ *
+ * `meta.changes` (rowCount) == 1  => approved.
+ * == 0 => either the budget no longer fits (tier shrank since submit) OR another
+ *   reviewer already moved the row. We disambiguate with ONE follow-up read of
+ *   the ad's status (the write already failed atomically, so this read cannot
+ *   reintroduce a TOCTOU): still 'pending' => 'budget_exceeded', else 'race'.
+ *
+ * Note: starts_at uses `(unixepoch() * 1000)` (D1 epoch-ms), NOT the Postgres
+ * `now()`; reviewed_at/reviewed_by are set here too so the whole approve write is
+ * one atomic statement.
+ */
+export async function approvePendingWithinBudget(
+  client: PgClient,
+  adId: string,
+  sponsorId: string,
+  thisAlloc: number,
+  reviewerId: string,
+): Promise<ApproveOutcome> {
+  const res = await client.query(
+    `UPDATE ads
+        SET status = 'approved',
+            reviewed_by = ?,
+            reviewed_at = (unixepoch() * 1000),
+            starts_at = (unixepoch() * 1000)
+      WHERE id = ?
+        AND status = 'pending'
+        AND (
+          (SELECT COALESCE(SUM(weight_alloc), 0)
+             FROM ads
+            WHERE sponsor_id = ?
+              AND kind = 'regular'
+              AND created_by_admin IS NULL
+              AND status IN ('pending', 'approved')
+              AND id != ?) + ?
+        ) <= (SELECT t.weight
+                FROM sponsors s
+                JOIN tiers t ON t.id = s.current_tier_id
+               WHERE s.discord_user_id = ?)`,
+    [reviewerId, adId, sponsorId, adId, thisAlloc, sponsorId],
+  );
+  if ((res.rowCount ?? 0) === 1) return 'approved';
+  const probe = await client.query<{ status: string }>(
+    'SELECT status FROM ads WHERE id = ?',
+    [adId],
+  );
+  return probe.rows[0]?.status === 'pending' ? 'budget_exceeded' : 'race';
+}
