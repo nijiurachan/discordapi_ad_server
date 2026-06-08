@@ -21,6 +21,7 @@ export type AdminAdRow = {
   title: string;
   status: AdStatus;
   weightSnapshot: number | null;
+  weightAlloc: number | null;
   createdAt: Date;
   startsAt: Date | null;
   endsAt: Date | null;
@@ -95,11 +96,12 @@ export async function listAdminAds(
     title: string;
     status: string;
     weight_snapshot: number | null;
+    weight_alloc: number | null;
     created_at: number | string | Date;
     starts_at: number | string | Date | null;
     ends_at: number | string | Date | null;
   }>(
-    `SELECT id, sponsor_id, kind, slot, title, status, weight_snapshot,
+    `SELECT id, sponsor_id, kind, slot, title, status, weight_snapshot, weight_alloc,
             created_at, starts_at, ends_at
        FROM ads
        ${whereClause}
@@ -116,6 +118,7 @@ export async function listAdminAds(
     title: r.title,
     status: r.status as AdStatus,
     weightSnapshot: r.weight_snapshot,
+    weightAlloc: r.weight_alloc,
     createdAt: toDate(r.created_at) ?? new Date(0),
     startsAt: toDate(r.starts_at),
     endsAt: toDate(r.ends_at),

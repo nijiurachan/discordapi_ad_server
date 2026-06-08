@@ -7,6 +7,7 @@ import {
   type AdminListFilters,
   type AdminListResult,
 } from '../db/queries/admin-ads.ts';
+import type { SponsorBudget } from '../sponsors/tier.ts';
 import { type ActionRowComponent, ButtonStyle, ComponentType } from './types.ts';
 
 export type AdminListState = AdminListFilters & { page: number };
@@ -62,12 +63,14 @@ function fmtDate(d: Date | null): string {
 function adLine(a: AdminAdRow): string {
   const sp = a.sponsorId ? `<@${a.sponsorId}>` : `(${a.kind})`;
   const w = a.weightSnapshot !== null ? `w=${a.weightSnapshot}` : 'w=—';
-  return `\`${a.id.slice(0, 8)}\` [${a.status}] ${a.title} ─ slot:${a.slot} kind:${a.kind} ${w} sp:${sp} created:${fmtDate(a.createdAt)}`;
+  const al = a.weightAlloc !== null ? ` alloc=${a.weightAlloc}` : '';
+  return `\`${a.id.slice(0, 8)}\` [${a.status}] ${a.title} ─ slot:${a.slot} kind:${a.kind} ${w}${al} sp:${sp} created:${fmtDate(a.createdAt)}`;
 }
 
 export function buildAdminAdsListEmbed(
   result: AdminListResult,
   state: AdminListState,
+  budget?: SponsorBudget | null,
 ): { title: string; description: string; color: number } {
   const filterParts: string[] = [];
   if (state.status) filterParts.push(`status=${state.status}`);
@@ -76,10 +79,13 @@ export function buildAdminAdsListEmbed(
   if (state.sponsorId) filterParts.push(`sponsor=<@${state.sponsorId}>`);
   const filterLabel =
     filterParts.length > 0 ? `🔍 ${filterParts.join(' / ')}` : '🔍 (フィルタなし)';
+  const budgetLine = budget
+    ? `\n💰 予算: ティア枠 ${budget.tierWeight} / 配分済 ${budget.used} / 残予算 ${budget.remaining}`
+    : '';
   const desc =
     result.ads.length === 0
-      ? `${filterLabel}\n\n該当する広告はありません。`
-      : `${filterLabel}\n\n${result.ads.map(adLine).join('\n')}`;
+      ? `${filterLabel}${budgetLine}\n\n該当する広告はありません。`
+      : `${filterLabel}${budgetLine}\n\n${result.ads.map(adLine).join('\n')}`;
   return {
     title: `📋 全広告一覧 (${result.totalCount} 件 / page ${result.page}/${result.totalPages})`,
     description: desc,

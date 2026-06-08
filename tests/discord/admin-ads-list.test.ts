@@ -16,6 +16,7 @@ const sampleAd: AdminAdRow = {
   title: 'Sample',
   status: 'approved',
   weightSnapshot: 10,
+  weightAlloc: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
   startsAt: null,
   endsAt: null,

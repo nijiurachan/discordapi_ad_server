@@ -15,6 +15,7 @@ import {
   type MessageComponentInteractionPayload,
 } from '../discord/types.ts';
 import type { Bindings } from '../env.ts';
+import { getSponsorBudget } from '../sponsors/tier.ts';
 import { ephemeral } from './responses.ts';
 
 function stateToFilters(state: AdminListState): AdminListFilters {
@@ -39,7 +40,8 @@ export async function runAdminAdsList(
     ADMIN_LIST_PAGE_SIZE,
   );
   const slots = await getDistinctSlots(client);
-  const embed = buildAdminAdsListEmbed(result, { ...state, page: result.page });
+  const budget = state.sponsorId ? await getSponsorBudget(client, state.sponsorId) : null;
+  const embed = buildAdminAdsListEmbed(result, { ...state, page: result.page }, budget);
   const components = buildAdminAdsListComponents(result, { ...state, page: result.page }, slots);
   return c.json({
     type: responseType,
