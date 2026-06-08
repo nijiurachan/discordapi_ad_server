@@ -130,6 +130,68 @@ describe('portal:manage', () => {
     expect(body.data.content).toContain('4');
   });
 
+  it('renders a per-banner 重み変更 button with custom_id portal:weight:<adId>', async () => {
+    const d = deps((sql) => {
+      if (/SELECT id, sponsor_id, channel_id/.test(sql)) return { rows: [portalRow] };
+      if (/FROM ads/.test(sql))
+        return {
+          rows: [
+            { id: 'a-9', slot: 'default', title: 'Promo', status: 'approved', weight_alloc: 4 },
+            { id: 'b-3', slot: 'default', title: 'Sale', status: 'pending', weight_alloc: 2 },
+          ],
+        };
+      return { rows: [] };
+    });
+    const res = await run('portal:manage', d);
+    const body = (await res.json()) as {
+      type: number;
+      data: {
+        components: { type: number; components: { custom_id?: string; label?: string }[] }[];
+      };
+    };
+    expect(body.type).toBe(4);
+    const buttons = body.data.components.flatMap((row) => row.components);
+    const ids = buttons.map((b) => b.custom_id);
+    expect(ids).toContain('portal:weight:a-9');
+    expect(ids).toContain('portal:weight:b-3');
+    // each action row must hold at most 5 components (Discord limit)
+    for (const row of body.data.components) {
+      expect(row.components.length).toBeLessThanOrEqual(5);
+    }
+    // and never more than 5 action rows
+    expect(body.data.components.length).toBeLessThanOrEqual(5);
+    expect(buttons.some((b) => b.label?.includes('重み変更'))).toBe(true);
+  });
+
+  it('caps the per-banner weight buttons at 5 and notes the overflow', async () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({
+      id: `a-${i}`,
+      slot: 'default',
+      title: `T${i}`,
+      status: 'approved',
+      weight_alloc: 1,
+    }));
+    const d = deps((sql) => {
+      if (/SELECT id, sponsor_id, channel_id/.test(sql)) return { rows: [portalRow] };
+      if (/FROM ads/.test(sql)) return { rows: many };
+      return { rows: [] };
+    });
+    const res = await run('portal:manage', d);
+    const body = (await res.json()) as {
+      type: number;
+      data: {
+        content: string;
+        components: { type: number; components: { custom_id?: string }[] }[];
+      };
+    };
+    const weightButtons = body.data.components
+      .flatMap((row) => row.components)
+      .filter((b) => b.custom_id?.startsWith('portal:weight:'));
+    expect(weightButtons.length).toBeLessThanOrEqual(5);
+    // overflow noted to the sponsor
+    expect(body.data.content).toContain('/ad list');
+  });
+
   it('shows the empty-state when the owner has no banners', async () => {
     const d = deps((sql) => ({
       rows: /SELECT id, sponsor_id, channel_id/.test(sql) ? [portalRow] : [],
@@ -154,6 +216,48 @@ describe('portal:manage', () => {
     );
     // No banner read for the clicker — the leak is closed.
     expect(calls.every((sql) => !/FROM ads/.test(sql))).toBe(true);
+  });
+});
+
+describe('portal:weight:<adId> (open weight modal)', () => {
+  it('returns a MODAL (type 9) with custom_id portal:weight-modal:<adId> for the owner', async () => {
+    const d = deps((sql) => {
+      // ownership lookup: the ad belongs to the clicker (s-1)
+      if (/FROM ads/.test(sql)) return { rows: [{ sponsor_id: 's-1' }] };
+      return { rows: [] };
+    });
+    const res = await run('portal:weight:a-9', d);
+    const body = (await res.json()) as {
+      type: number;
+      data: {
+        custom_id: string;
+        title: string;
+        components: { type: number; components: { custom_id: string; label: string }[] }[];
+      };
+    };
+    expect(body.type).toBe(9);
+    expect(body.data.custom_id).toBe('portal:weight-modal:a-9');
+    const input = body.data.components[0]?.components[0];
+    expect(input?.label).toContain('新しい重み');
+  });
+
+  it('rejects a non-owner adId (sponsor_id != clicker) with an ephemeral and no modal', async () => {
+    const d = deps((sql) => {
+      // the ad belongs to someone else
+      if (/FROM ads/.test(sql)) return { rows: [{ sponsor_id: 'other-owner' }] };
+      return { rows: [] };
+    });
+    const res = await run('portal:weight:a-9', d);
+    const body = (await res.json()) as { type: number; data: { content: string } };
+    expect(body.type).toBe(4);
+    expect(body.data.content).toContain('対象のスポンサーのみ');
+  });
+
+  it('rejects a missing adId with an ephemeral', async () => {
+    const d = deps(() => ({ rows: [] }));
+    const res = await run('portal:weight:does-not-exist', d);
+    const body = (await res.json()) as { type: number; data: { content: string } };
+    expect(body.type).toBe(4);
   });
 });
 

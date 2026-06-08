@@ -68,6 +68,20 @@ export async function getSponsorAds(
   }));
 }
 
+/**
+ * Owner lookup for a single ad. Returns the `sponsor_id` of the ad, or `null`
+ * when no such ad exists. Used by the portal weight-change button to confirm
+ * ownership (`sponsor_id == clicker`) before opening the edit modal — mirrors
+ * the resolve-then-compare ownership pattern used elsewhere in the portal.
+ */
+export async function getAdSponsorId(client: PgClient, adId: string): Promise<string | null> {
+  const res = await client.query<{ sponsor_id: string | null }>(
+    'SELECT sponsor_id FROM ads WHERE id = ?',
+    [adId],
+  );
+  return res.rows[0]?.sponsor_id ?? null;
+}
+
 export type WithdrawResult =
   | { ok: true }
   | { ok: false; reason: 'not_found' | 'not_owner' | 'invalid_status' };

@@ -181,6 +181,12 @@ interactions.post('/', async (c) => {
       if (cid === 'portal:open') {
         return handlePortalOpenButton(c, mc);
       }
+      // portal:weight:<adId> — per-banner weight-change button. Routes through
+      // the same dashboard handler (which gates on ownership before returning
+      // the modal). Listed explicitly per Task 3 §3.C-4 wiring.
+      if (cid.startsWith('portal:weight:')) {
+        return handlePortalDashboardButton(c, mc);
+      }
       if (cid.startsWith('portal:')) {
         return handlePortalDashboardButton(c, mc);
       }

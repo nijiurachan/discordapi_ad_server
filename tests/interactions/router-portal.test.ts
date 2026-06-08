@@ -71,4 +71,26 @@ describe('/interactions router → portal: arm (integration)', () => {
       expect([4, 7]).toContain(json.type);
     }
   });
+
+  it('routes portal:weight:<adId> to the dashboard handler, not the 501 dispatch fallback', async () => {
+    const body = JSON.stringify({
+      type: 3,
+      id: 'int-portal-3',
+      application_id: 'app-1',
+      token: 'tok-3',
+      guild_id: 'guild-1',
+      channel_id: 'chan-1',
+      member: { user: { id: 'user-1', username: 'u1' }, roles: [] },
+      data: { custom_id: 'portal:weight:a-1', component_type: 2 },
+    });
+    const res = await post(body);
+    // Reached the handler (not the 501 fallback). In the test env it may 200
+    // (ephemeral "ポータルが見つかりません"/owner reject) or 500 (DB error); both prove routing.
+    expect([200, 500]).toContain(res.status);
+    if (res.status === 200) {
+      const json = (await res.json()) as { type: number };
+      // type 4 ephemeral or type 9 modal — never the dispatch 501.
+      expect([4, 9]).toContain(json.type);
+    }
+  });
 });
