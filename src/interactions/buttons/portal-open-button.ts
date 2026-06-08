@@ -66,6 +66,24 @@ async function fulfillPortalOpen(
     console.error('portal open: refreshSponsorTier failed', { sponsorId, err });
   }
 
+  // First-time-user FK guard: refreshSponsorTier above is the only path that
+  // upserts the sponsors row, and its failure is swallowed (transient 5xx /
+  // rate-limit / user left the guild). createPortalRow then violates the
+  // sponsors FK (D1 enforces foreign_keys), giving an opaque failure. Run an
+  // idempotent INSERT so the row always exists before we open the channel;
+  // ON CONFLICT DO NOTHING makes it a no-op when refreshSponsorTier succeeded
+  // (matches admin-submit.ts's sponsor-row guard).
+  try {
+    await client.query(
+      `INSERT INTO sponsors (discord_user_id, display_name)
+         VALUES (?, ?)
+       ON CONFLICT (discord_user_id) DO NOTHING`,
+      [sponsorId, displayName || sponsorId],
+    );
+  } catch (err) {
+    console.error('portal open: sponsor-row guard INSERT failed', { sponsorId, err });
+  }
+
   const opened = await openOrReusePortalChannel({
     client,
     rest: deps.rest,
@@ -84,48 +102,64 @@ async function fulfillPortalOpen(
     return;
   }
 
-  const [budget, banners] = await Promise.all([
-    getSponsorBudget(client, sponsorId),
-    getSponsorActiveBanners(client, sponsorId),
-  ]);
-
-  // used-count numerator = regular non-admin pending+approved banner count
-  // (banners.length), NOT the broad countActiveAds (which counts all kinds).
-  // cap denominator = tierWeight (each banner ≥1 weight and Σ≤tierWeight ⇒
-  // count≤tierWeight). `remaining` is shown separately via budget.remaining.
-  const dashboard = buildPortalDashboard({
-    tierName,
-    budget,
-    maxActiveAds: budget?.tierWeight ?? 0,
-    usedCount: banners.length,
-    banners,
-  });
-
-  // dashboardMessageId may be stale after a self-heal; re-read the row when we
-  // reused so we don't try to edit a message in a different (deleted) channel.
-  let dashboardMessageId = opened.dashboardMessageId;
-  if (opened.reusedExisting) {
-    const fresh = await findPortalById(client, opened.portalId);
-    dashboardMessageId = fresh?.dashboardMessageId ?? null;
-  }
-
+  // The channel now exists. Every path past this point MUST send exactly one
+  // editOriginalInteractionResponse — otherwise the deferred ephemeral is stuck
+  // "thinking…" forever and the created channel is orphaned. Wrap the post-open
+  // reads/render so any throw still surfaces a followup pointing at the channel.
   try {
-    await renderPortalDashboard({
-      client,
-      rest: deps.rest,
-      portalId: opened.portalId,
-      channelId: opened.channelId,
-      dashboardMessageId,
-      dashboard,
-    });
-    await touchPortalActivity(client, opened.portalId);
-  } catch (err) {
-    console.error('portal open: renderPortalDashboard failed', { portalId: opened.portalId, err });
-  }
+    const [budget, banners] = await Promise.all([
+      getSponsorBudget(client, sponsorId),
+      getSponsorActiveBanners(client, sponsorId),
+    ]);
 
-  await deps.rest.editOriginalInteractionResponse(deps.appId, token, {
-    content: `✅ 広告ポータルを開きました: <#${opened.channelId}>`,
-  });
+    // used-count numerator = regular non-admin pending+approved banner count
+    // (banners.length), NOT the broad countActiveAds (which counts all kinds).
+    // cap denominator = tierWeight (each banner ≥1 weight and Σ≤tierWeight ⇒
+    // count≤tierWeight). `remaining` is shown separately via budget.remaining.
+    const dashboard = buildPortalDashboard({
+      tierName,
+      budget,
+      maxActiveAds: budget?.tierWeight ?? 0,
+      usedCount: banners.length,
+      banners,
+    });
+
+    // dashboardMessageId may be stale after a self-heal; re-read the row when we
+    // reused so we don't try to edit a message in a different (deleted) channel.
+    let dashboardMessageId = opened.dashboardMessageId;
+    if (opened.reusedExisting) {
+      const fresh = await findPortalById(client, opened.portalId);
+      dashboardMessageId = fresh?.dashboardMessageId ?? null;
+    }
+
+    try {
+      await renderPortalDashboard({
+        client,
+        rest: deps.rest,
+        portalId: opened.portalId,
+        channelId: opened.channelId,
+        dashboardMessageId,
+        dashboard,
+      });
+      await touchPortalActivity(client, opened.portalId);
+    } catch (err) {
+      console.error('portal open: renderPortalDashboard failed', {
+        portalId: opened.portalId,
+        err,
+      });
+    }
+
+    await deps.rest.editOriginalInteractionResponse(deps.appId, token, {
+      content: `✅ 広告ポータルを開きました: <#${opened.channelId}>`,
+    });
+  } catch (err) {
+    // Post-open work (budget/banner reads) threw. The channel still exists, so
+    // point the sponsor at it instead of leaving the deferred ACK hanging.
+    console.error('portal open: post-open work failed', { portalId: opened.portalId, err });
+    await deps.rest.editOriginalInteractionResponse(deps.appId, token, {
+      content: `⚠ ポータルは開きましたが情報の取得に失敗しました: <#${opened.channelId}>`,
+    });
+  }
 }
 
 export async function runPortalOpenButton(

@@ -86,6 +86,45 @@ describe('runPortalOpenButton', () => {
     expect(scheduled.length).toBe(1);
   });
 
+  it('still sends exactly one followup pointing at the channel when post-open reads throw', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const scheduled: Promise<unknown>[] = [];
+    // A client whose post-open banner read (FROM ads) throws — proving the
+    // deferred ACK is never left hanging: the channel exists, so the followup
+    // must point at it instead of returning without any editOriginalInteractionResponse.
+    const throwingClient = {
+      query: vi.fn(async (sql: string) => {
+        if (/FROM ads/.test(sql)) throw new Error('post-open read boom');
+        return /SELECT/.test(sql) ? { rows: [], rowCount: 0 } : { rows: [], rowCount: 1 };
+      }),
+      end: vi.fn(),
+    } as unknown as PgClient;
+    const localFollowup = vi.fn(async () => ({ id: 'm-1', channel_id: 'c-new' }));
+    const app = new Hono();
+    app.post('/', async (c) =>
+      runPortalOpenButton(c, payload(), {
+        ...deps,
+        rest: { ...deps.rest, editOriginalInteractionResponse: localFollowup } as DiscordRest,
+        withClient: ((fn: (client: PgClient) => Promise<unknown>) =>
+          fn(throwingClient)) as PortalOpenDeps['withClient'],
+        waitUntil: (p) => {
+          scheduled.push(p);
+        },
+      }),
+    );
+    await app.request('/', { method: 'POST' });
+    await Promise.all(scheduled);
+    // Exactly one followup, and it links the created channel (degraded message).
+    expect(localFollowup).toHaveBeenCalledTimes(1);
+    const [, , body] = localFollowup.mock.calls[0] as unknown as [
+      string,
+      string,
+      { content: string },
+    ];
+    expect(body.content).toContain('<#c-new>');
+    expect(body.content).toContain('情報の取得に失敗');
+  });
+
   it('opens a fresh client inside waitUntil and posts a followup with the channel link', async () => {
     const scheduled: Promise<unknown>[] = [];
     const res = await ctx(scheduled).request('/', { method: 'POST' });

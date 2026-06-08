@@ -128,6 +128,48 @@ describe('openOrReusePortalChannel — create', () => {
     );
   });
 
+  it('deletes the orphan channel BEFORE the row when the channel_id UPDATE fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Track when each side effect happened so we can assert ordering.
+    const events: string[] = [];
+    const captured: Capture[] = [];
+    const client: PgClient = {
+      query: vi.fn(async (sql: string, params?: unknown[]) => {
+        captured.push({ sql, params });
+        if (/SELECT/.test(sql)) return { rows: [], rowCount: 0 };
+        if (/UPDATE portal_channels SET channel_id/.test(sql)) {
+          throw new Error('step-4 update boom');
+        }
+        if (/DELETE FROM portal_channels WHERE id = \?/.test(sql)) {
+          events.push('rowDelete');
+        }
+        return { rows: [], rowCount: 1 };
+      }) as unknown as PgClient['query'],
+      end: vi.fn(async () => undefined),
+    };
+    const deleteChannel = vi.fn(async () => {
+      events.push('deleteChannel');
+      return { id: 'c-new', type: 0 };
+    });
+    const rest = {
+      getChannel: vi.fn(),
+      createGuildChannel: vi.fn(async () => ({ id: 'c-new', type: 0 })),
+      deleteChannel,
+    } as unknown as DiscordRest;
+
+    const res = await openOrReusePortalChannel({ ...ARGS, client, rest });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('db_error');
+    // The orphan Discord channel is deleted...
+    expect(deleteChannel).toHaveBeenCalledWith('c-new');
+    // ...and the orphan row is deleted...
+    expect(captured.some((c) => /DELETE FROM portal_channels WHERE id = \?/.test(c.sql))).toBe(
+      true,
+    );
+    // ...with the channel delete strictly preceding the row delete.
+    expect(events).toEqual(['deleteChannel', 'rowDelete']);
+  });
+
   it('rolls back the row when createGuildChannel fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { client, captured } = clientWith((sql) =>
