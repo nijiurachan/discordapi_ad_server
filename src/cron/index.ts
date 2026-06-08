@@ -6,6 +6,7 @@ import { auditSponsorMembership } from './audit-sponsor-membership.ts';
 import { sweepDmFallbackChannels } from './dm-fallback-sweep.ts';
 import { expireAds } from './expire-ads.ts';
 import { postSystemHealthSummary } from './health-summary.ts';
+import { sweepPortalChannels } from './portal-sweep.ts';
 import { rotateDailySalt } from './rotate-salt.ts';
 import { sweepAdEvents } from './sweep-ad-events.ts';
 import { sweepExpiredDrafts } from './sweep-drafts.ts';
@@ -64,6 +65,12 @@ async function runHourly(env: Bindings): Promise<void> {
     const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
     const result = await withPgClient(env, (client) => sweepDmFallbackChannels(client, rest));
     console.log('cron.hourly.dm-fallback-sweep', result);
+  });
+
+  await runSafely('portal-sweep', async () => {
+    const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
+    const result = await withPgClient(env, (client) => sweepPortalChannels(client, rest));
+    console.log('cron.hourly.portal-sweep', result);
   });
 }
 
