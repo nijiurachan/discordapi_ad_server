@@ -36,3 +36,24 @@ export function buildFallbackOverwrites(args: {
     { id: args.botId, type: 1, allow: PERM_ALLOW_BOT },
   ];
 }
+
+export function buildPortalOverwrites(args: {
+  guildId: string;
+  sponsorId: string;
+  botId: string;
+  reviewerRoleId: string;
+  adminRoleId: string;
+}): PermissionOverwrite[] {
+  const overwrites: PermissionOverwrite[] = [
+    { id: args.guildId, type: 0, deny: PERM_DENY_EVERYONE },
+    { id: args.sponsorId, type: 1, allow: PERM_ALLOW_SPONSOR },
+    { id: args.botId, type: 1, allow: PERM_ALLOW_BOT },
+  ];
+  // Staff get VIEW + READ_HISTORY only (same bitmask as a sponsor). Skip empty
+  // env ids and any staff role equal to @everyone (already covered by the deny).
+  for (const roleId of [args.reviewerRoleId, args.adminRoleId]) {
+    if (!roleId || roleId === args.guildId) continue;
+    overwrites.push({ id: roleId, type: 0, allow: PERM_ALLOW_SPONSOR });
+  }
+  return overwrites;
+}

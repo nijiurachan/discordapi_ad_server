@@ -5,6 +5,7 @@ import {
   PERM_DENY_EVERYONE,
   PermissionBit,
   buildFallbackOverwrites,
+  buildPortalOverwrites,
 } from '../../src/discord/permissions.ts';
 
 describe('PermissionBit constants', () => {
@@ -58,5 +59,35 @@ describe('buildFallbackOverwrites', () => {
     expect(overwrites[0]?.deny).toBe(PERM_DENY_EVERYONE);
     expect(overwrites[1]?.allow).toBe(PERM_ALLOW_SPONSOR);
     expect(overwrites[2]?.allow).toBe(PERM_ALLOW_BOT);
+  });
+});
+
+describe('buildPortalOverwrites', () => {
+  it('denies @everyone and allows sponsor, bot, reviewer role, admin role', () => {
+    const ow = buildPortalOverwrites({
+      guildId: 'g',
+      sponsorId: 's',
+      botId: 'b',
+      reviewerRoleId: 'rev',
+      adminRoleId: 'adm',
+    });
+    expect(ow).toEqual([
+      { id: 'g', type: 0, deny: '1024' },
+      { id: 's', type: 1, allow: '66560' },
+      { id: 'b', type: 1, allow: '76800' },
+      { id: 'rev', type: 0, allow: '66560' },
+      { id: 'adm', type: 0, allow: '66560' },
+    ]);
+  });
+
+  it('dedupes staff roles equal to @everyone and skips empty ids', () => {
+    const ow = buildPortalOverwrites({
+      guildId: 'g',
+      sponsorId: 's',
+      botId: 'b',
+      reviewerRoleId: '',
+      adminRoleId: 'g',
+    });
+    expect(ow.map((o) => o.id)).toEqual(['g', 's', 'b']);
   });
 });
