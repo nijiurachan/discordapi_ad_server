@@ -139,4 +139,31 @@ describe('getSponsorActiveBanners', () => {
     expect(captured[0]?.sql).toMatch(/created_by_admin IS NULL/);
     expect(captured[0]?.params).toEqual(['s-1']);
   });
+
+  it('maps a null weight_alloc to weightAlloc:null and orders approved before pending', async () => {
+    const captured: Capture[] = [];
+    const banners = await getSponsorActiveBanners(
+      mockClient(
+        [
+          { id: 'a-1', slot: 'default', title: 'P', status: 'pending', weight_alloc: null },
+          { id: 'a-2', slot: 'default', title: 'A', status: 'approved', weight_alloc: 3 },
+        ],
+        captured,
+      ),
+      's-1',
+    );
+    // A null weight_alloc must survive as null (NOT coerced to 0) so the UI can
+    // distinguish "not yet allocated" from "zero".
+    expect(banners[0]).toEqual({
+      id: 'a-1',
+      slot: 'default',
+      title: 'P',
+      status: 'pending',
+      weightAlloc: null,
+    });
+    expect(banners[1]?.weightAlloc).toBe(3);
+    expect(captured[0]?.sql).toMatch(
+      /ORDER BY[\s\S]*CASE status WHEN 'approved' THEN 1 WHEN 'pending' THEN 2/,
+    );
+  });
 });

@@ -76,6 +76,28 @@ describe('portal:refresh', () => {
     expect(body.type).toBe(7);
     expect(Array.isArray(body.data.embeds)).toBe(true);
   });
+
+  it('rejects a non-owner (staff) and never loads the clicker data into the owner channel', async () => {
+    // Channel c-1 belongs to 'other-owner'; the clicker is 's-1' (e.g. staff who
+    // can VIEW the channel). The portal must resolve by channel, see the owner
+    // mismatch, and refuse — NOT overwrite the dashboard with the clicker's data.
+    const notOwnerRow = { ...portalRow, sponsor_id: 'other-owner' };
+    const d = deps((sql) => ({
+      rows: /SELECT id, sponsor_id, channel_id/.test(sql) ? [notOwnerRow] : [],
+    }));
+    const res = await run('portal:refresh', d);
+    const body = (await res.json()) as { type: number; data: { content: string } };
+    // Ephemeral not-owner message, never a type-7 in-place edit.
+    expect(body.type).toBe(4);
+    expect(body.data.content).toContain('対象のスポンサーのみ');
+    // The clicker's banners/budget must never be loaded into the owner's channel:
+    // the ONLY query allowed is the channel lookup; no ads/banner SELECT runs.
+    const calls = (d.client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0] as string,
+    );
+    expect(calls.every((sql) => !/FROM ads/.test(sql))).toBe(true);
+    expect(calls.every((sql) => !/UPDATE portal_channels SET last_active_at/.test(sql))).toBe(true);
+  });
 });
 
 describe('portal:manage', () => {
@@ -87,6 +109,51 @@ describe('portal:manage', () => {
     const body = (await res.json()) as { type: number; data: { flags: number } };
     expect(body.type).toBe(4);
     expect(body.data.flags).toBe(64);
+  });
+
+  it('lists the owner banners with id/title/weight', async () => {
+    const d = deps((sql) => {
+      if (/SELECT id, sponsor_id, channel_id/.test(sql)) return { rows: [portalRow] };
+      if (/FROM ads/.test(sql))
+        return {
+          rows: [
+            { id: 'a-9', slot: 'default', title: 'Promo', status: 'approved', weight_alloc: 4 },
+          ],
+        };
+      return { rows: [] };
+    });
+    const res = await run('portal:manage', d);
+    const body = (await res.json()) as { type: number; data: { content: string } };
+    expect(body.type).toBe(4);
+    expect(body.data.content).toContain('a-9');
+    expect(body.data.content).toContain('Promo');
+    expect(body.data.content).toContain('4');
+  });
+
+  it('shows the empty-state when the owner has no banners', async () => {
+    const d = deps((sql) => ({
+      rows: /SELECT id, sponsor_id, channel_id/.test(sql) ? [portalRow] : [],
+    }));
+    const res = await run('portal:manage', d);
+    const body = (await res.json()) as { type: number; data: { content: string } };
+    expect(body.type).toBe(4);
+    expect(body.data.content).toContain('管理対象のバナーはありません');
+  });
+
+  it('rejects a non-owner (staff) and never loads the clicker banners', async () => {
+    const notOwnerRow = { ...portalRow, sponsor_id: 'other-owner' };
+    const d = deps((sql) => ({
+      rows: /SELECT id, sponsor_id, channel_id/.test(sql) ? [notOwnerRow] : [],
+    }));
+    const res = await run('portal:manage', d);
+    const body = (await res.json()) as { type: number; data: { content: string } };
+    expect(body.type).toBe(4);
+    expect(body.data.content).toContain('対象のスポンサーのみ');
+    const calls = (d.client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[0] as string,
+    );
+    // No banner read for the clicker — the leak is closed.
+    expect(calls.every((sql) => !/FROM ads/.test(sql))).toBe(true);
   });
 });
 

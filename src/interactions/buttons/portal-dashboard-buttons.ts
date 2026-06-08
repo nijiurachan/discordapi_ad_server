@@ -2,7 +2,6 @@ import type { Context } from 'hono';
 import { type PgClient, withPgClient } from '../../db/client.ts';
 import {
   findOpenPortalByChannel,
-  findOpenPortalBySponsor,
   getSponsorActiveBanners,
   touchPortalActivity,
 } from '../../db/queries/portal.ts';
@@ -65,7 +64,17 @@ export async function runPortalDashboardButton(
   }
 
   if (cid === 'portal:manage') {
-    const banners = await getSponsorActiveBanners(deps.client, userId);
+    // Resolve by the channel the button was clicked in (NOT the clicker) and
+    // gate on ownership: staff can VIEW any portal, so keying the banner list on
+    // the clicker would leak the clicker's banners into another sponsor's
+    // channel. Mirror portal:close's resolve+check.
+    const channelId = payload.channel_id ?? '';
+    const portal = channelId ? await findOpenPortalByChannel(deps.client, channelId) : null;
+    if (!portal) return ephemeral(c, 'ポータルが見つかりません。');
+    if (portal.sponsorId !== userId) {
+      return ephemeral(c, 'この操作を行えるのは対象のスポンサーのみです。');
+    }
+    const banners = await getSponsorActiveBanners(deps.client, portal.sponsorId);
     const lines =
       banners.length === 0
         ? '_管理対象のバナーはありません_'
@@ -79,8 +88,17 @@ export async function runPortalDashboardButton(
   }
 
   // portal:refresh — re-render the dashboard in place (type 7).
-  const portal = await findOpenPortalBySponsor(deps.client, userId);
-  if (!portal) return ephemeral(c, 'ポータルが見つかりません。再度開いてください。');
+  // Resolve by the clicked channel and gate on ownership: staff can VIEW any
+  // portal, so keying the dashboard on the clicker would overwrite another
+  // sponsor's dashboard with the clicker's private budget/banners. Mirror
+  // portal:close's resolve+check.
+  const channelId = payload.channel_id ?? '';
+  const portal = channelId ? await findOpenPortalByChannel(deps.client, channelId) : null;
+  if (!portal) return ephemeral(c, 'ポータルが見つかりません。');
+  if (portal.sponsorId !== userId) {
+    return ephemeral(c, 'この操作を行えるのは対象のスポンサーのみです。');
+  }
+  const ownerId = portal.sponsorId;
 
   let tierName: string | null = null;
   try {
@@ -88,17 +106,17 @@ export async function runPortalDashboardButton(
       rest: deps.rest,
       client: deps.client,
       guildId: deps.guildId,
-      userId,
+      userId: ownerId,
       displayName,
     });
     tierName = tier?.name ?? null;
   } catch (err) {
-    console.error('portal refresh: refreshSponsorTier failed', { userId, err });
+    console.error('portal refresh: refreshSponsorTier failed', { userId: ownerId, err });
   }
 
   const [budget, banners] = await Promise.all([
-    getSponsorBudget(deps.client, userId),
-    getSponsorActiveBanners(deps.client, userId),
+    getSponsorBudget(deps.client, ownerId),
+    getSponsorActiveBanners(deps.client, ownerId),
   ]);
 
   await touchPortalActivity(deps.client, portal.id);
