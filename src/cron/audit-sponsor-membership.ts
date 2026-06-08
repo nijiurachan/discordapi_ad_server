@@ -1,5 +1,7 @@
 import type { PgClient } from '../db/client.ts';
+import { applyEffectiveWeights, getSponsorActiveRegularAllocs } from '../db/queries/review.ts';
 import { type DiscordRest, DiscordRestError } from '../discord/rest.ts';
+import { effectiveWeights } from '../sponsors/tier.ts';
 
 export type AuditResult = {
   sponsorsChecked: number;
@@ -8,6 +10,7 @@ export type AuditResult = {
   sponsorsWeightSynced: number;
   adsWithdrawn: number;
   adsWeightChanged: number;
+  adsPaused: number;
   errors: number;
 };
 
@@ -87,47 +90,82 @@ async function withdrawAllForSponsor(
   return res.rows.map((r) => r.id);
 }
 
+type SyncOutcome = {
+  changed: { id: string; oldWeight: number | null; newWeight: number }[];
+  paused: string[];
+};
+
+/**
+ * Recompute effective deck weights for one sponsor from their intended allocs
+ * and the live tier weight, then persist (smallest-alloc-first pause when the
+ * banner count exceeds the new budget). Records a before/after admin_log.
+ * Returns what changed so the caller can DM and tally. created_by_admin ads
+ * are excluded by getSponsorActiveRegularAllocs.
+ */
 async function syncWeightForSponsor(
   client: PgClient,
   sponsorId: string,
   newWeight: number,
-): Promise<{ id: string; oldWeight: number | null }[]> {
-  // Only re-snapshot already-approved (currently-serving) ads. pending ads will
-  // pick up the live tier weight at approval time via approveAd; paused ads
-  // are held intentionally and shouldn't be touched.
-  // Admin-contributed ads carry an admin-set weight (often manually tuned);
-  // don't clobber it from the sponsor's live tier on every cron run.
-  const changed = await client.query<{ id: string; weight_snapshot: number | null }>(
+): Promise<SyncOutcome> {
+  const before = await client.query<{ id: string; weight_snapshot: number | null }>(
+    // Read the SAME status set the budget reads (pending+approved) so the
+    // before/after admin_log mirrors exactly what getSponsorActiveRegularAllocs
+    // recomputes. Do NOT include 'paused' here (paused ads are out of the active
+    // budget set; they re-enter only if un-paused, which is a separate action).
     `SELECT id, weight_snapshot
        FROM ads
       WHERE sponsor_id = ?
         AND created_by_admin IS NULL
-        AND status = 'approved'
-        AND (weight_snapshot IS NULL OR weight_snapshot != ?)`,
-    [sponsorId, newWeight],
+        AND status IN ('pending', 'approved')`,
+    [sponsorId],
   );
-  if (changed.rows.length === 0) return [];
+  const oldById = new Map(before.rows.map((r) => [r.id, r.weight_snapshot]));
+
+  const allocs = await getSponsorActiveRegularAllocs(client, sponsorId);
+  if (allocs.length === 0) return { changed: [], paused: [] };
+  const eff = effectiveWeights(allocs, newWeight);
+
+  const changed = eff.weights
+    .map((w) => ({
+      id: w.id,
+      oldWeight: oldById.get(w.id) ?? null,
+      newWeight: w.weightSnapshot,
+    }))
+    .filter((w) => w.oldWeight !== w.newWeight);
+
+  if (changed.length === 0 && eff.paused.length === 0) return { changed: [], paused: [] };
+
+  await applyEffectiveWeights(client, eff.weights, eff.paused);
+
   await client.query(
-    `UPDATE ads
-        SET weight_snapshot = ?
-      WHERE sponsor_id = ?
-        AND created_by_admin IS NULL
-        AND status = 'approved'
-        AND (weight_snapshot IS NULL OR weight_snapshot != ?)`,
-    [newWeight, sponsorId, newWeight],
-  );
-  await client.query(
-    `INSERT INTO admin_logs (actor_id, action, target_kind, target_id, after)
-       VALUES ('system', 'auto_resnapshot_weight', 'sponsor', ?, ?)`,
+    `INSERT INTO admin_logs (actor_id, action, target_kind, target_id, before, after)
+       VALUES ('system', 'auto_rescale_weight', 'sponsor', ?, ?, ?)`,
     [
       sponsorId,
-      JSON.stringify({
-        new_weight: newWeight,
-        affected: changed.rows.map((r) => ({ id: r.id, old_weight: r.weight_snapshot })),
-      }),
+      JSON.stringify({ tier_weight: newWeight, weights: before.rows }),
+      JSON.stringify({ weights: eff.weights, paused: eff.paused }),
     ],
   );
-  return changed.rows.map((r) => ({ id: r.id, oldWeight: r.weight_snapshot }));
+
+  return { changed, paused: eff.paused };
+}
+
+async function notifySponsorPaused(
+  rest: DiscordRest,
+  sponsorId: string,
+  pausedCount: number,
+  tierWeight: number,
+): Promise<void> {
+  // Best-effort DM; a blocked/closed DM must not fail the audit. The user is
+  // in a sensitive (downgrade) state, so keep the copy factual and brief.
+  try {
+    const ch = await rest.createDmChannel(sponsorId);
+    await rest.createMessage(ch.id, {
+      content: `ティア枠（重み ${tierWeight}）の縮小により、配分の小さいバナー ${pausedCount} 件を一時停止しました。残りのバナーは新しい枠に比例して配信されます。配分の見直しは \`/ad list\` から行えます。`,
+    });
+  } catch (err) {
+    console.error('audit: pause DM failed (continuing)', { sponsorId, err });
+  }
 }
 
 /**
@@ -182,6 +220,7 @@ export async function auditSponsorMembership(
     sponsorsWeightSynced: 0,
     adsWithdrawn: 0,
     adsWeightChanged: 0,
+    adsPaused: 0,
     errors: 0,
   };
 
@@ -220,10 +259,14 @@ export async function auditSponsorMembership(
       continue;
     }
 
-    const changed = await syncWeightForSponsor(client, sponsorId, tier.weight);
-    if (changed.length > 0) {
+    const outcome = await syncWeightForSponsor(client, sponsorId, tier.weight);
+    if (outcome.changed.length > 0 || outcome.paused.length > 0) {
       result.sponsorsWeightSynced++;
-      result.adsWeightChanged += changed.length;
+      result.adsWeightChanged += outcome.changed.length;
+      result.adsPaused += outcome.paused.length;
+    }
+    if (outcome.paused.length > 0) {
+      await notifySponsorPaused(rest, sponsorId, outcome.paused.length, tier.weight);
     }
   }
 
