@@ -79,3 +79,38 @@ export function checkMaxActiveAds(tier: Tier, activeCount: number): MaxActiveAds
   }
   return { ok: true };
 }
+
+export type EffectiveWeightsInput = { id: string; weightAlloc: number };
+export type EffectiveWeightsResult = {
+  weights: Array<{ id: string; weightSnapshot: number }>;
+  paused: string[];
+};
+
+/**
+ * Derive each banner's effective deck weight (`weight_snapshot`) from the
+ * sponsor's intended allocations and the tier budget `tierWeight` (= T).
+ *
+ * Used IDENTICALLY by approve.ts and the audit cron so the two paths can
+ * never drift. Pure: no DB, deterministic.
+ *
+ * - If S = Σ weightAlloc <= T: snapshot = alloc (upper-bound semantics; the
+ *   unused budget T - S simply yields a smaller total share, never inflates).
+ * - Else (S > T, e.g. after a downgrade): proportionally rescale
+ *   snapshot_i = max(1, round(alloc_i * T / S)); the integer remainder is
+ *   absorbed on the largest-alloc banner so Σ snapshot == T. If count > T the
+ *   min-1 floor would still overshoot, so move smallest-alloc-first to
+ *   'paused' until count <= T, then recompute over the survivors.
+ */
+export function effectiveWeights(
+  allocs: EffectiveWeightsInput[],
+  tierWeight: number,
+): EffectiveWeightsResult {
+  const S = allocs.reduce((sum, a) => sum + a.weightAlloc, 0);
+  if (S <= tierWeight) {
+    return {
+      weights: allocs.map((a) => ({ id: a.id, weightSnapshot: a.weightAlloc })),
+      paused: [],
+    };
+  }
+  throw new Error('not implemented');
+}
