@@ -134,10 +134,16 @@ export type ActiveBanner = {
  * function in the codebase (Phase 1 must NOT define a function of this name;
  * if Phase 1 needs a banner list it uses its existing getSponsorAds).
  *
- * Dashboard read: the sponsor's approved+pending REGULAR ads with their
- * per-banner weight allocation. Returns `{ id, slot, title, status, weightAlloc }`.
+ * Dashboard read: the sponsor's approved+pending REGULAR, non-admin ads with
+ * their per-banner weight allocation. Returns `{ id, slot, title, status, weightAlloc }`.
  * Distinct from getSponsorAds (LIMIT 5, includes terminal statuses).
  * `weight_alloc` is the Phase-1 column.
+ *
+ * The `created_by_admin IS NULL` filter mirrors sumActiveWeight in
+ * src/sponsors/tier.ts: admin-contributed ads are intentionally out of the
+ * sponsor's budget, so they must not be counted as used banners either. Without
+ * it the dashboard 件数(使用/上限) would over-count and list an admin ad that
+ * does not consume the budget (spec line 61: 'regular・非admin の pending+approved').
  */
 export async function getSponsorActiveBanners(
   client: PgClient,
@@ -154,6 +160,7 @@ export async function getSponsorActiveBanners(
        FROM ads
       WHERE sponsor_id = ?
         AND kind = 'regular'
+        AND created_by_admin IS NULL
         AND status IN ('approved', 'pending')
       ORDER BY
         CASE status WHEN 'approved' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END,

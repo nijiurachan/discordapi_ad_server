@@ -136,6 +136,7 @@ describe('getSponsorActiveBanners', () => {
     expect(captured[0]?.sql).toMatch(/FROM ads/);
     expect(captured[0]?.sql).toMatch(/status IN \('approved', 'pending'\)/);
     expect(captured[0]?.sql).toMatch(/kind = 'regular'/);
+    expect(captured[0]?.sql).toMatch(/created_by_admin IS NULL/);
     expect(captured[0]?.params).toEqual(['s-1']);
   });
 });
