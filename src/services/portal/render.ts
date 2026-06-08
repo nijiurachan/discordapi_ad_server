@@ -20,6 +20,8 @@ function dashboardButtons(): Record<string, unknown> {
     components: [
       { type: 2, style: 1, custom_id: 'portal:add', label: '➕ バナーを追加' },
       { type: 2, style: 2, custom_id: 'portal:manage', label: '🗂 管理' },
+      // Reuse the existing stats flow: 'ad:stats:period' routes to periodSelectMenuResponse.
+      { type: 2, style: 2, custom_id: 'ad:stats:period', label: '📊 統計' },
       { type: 2, style: 2, custom_id: 'portal:refresh', label: '🔄 更新' },
       { type: 2, style: 4, custom_id: 'portal:close', label: '✖ 閉じる' },
     ],

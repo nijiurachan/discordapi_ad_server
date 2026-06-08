@@ -28,14 +28,20 @@ describe('buildPortalDashboard', () => {
     expect(text).toContain('2 / 3'); // used / cap
     expect(text).toContain('Banner One');
     expect(text).toContain('Banner Two');
-    // 4 dashboard buttons present
-    const row = msg.components[0] as { components: { custom_id: string }[] };
-    expect(row.components.map((b) => b.custom_id)).toEqual([
-      'portal:add',
-      'portal:manage',
-      'portal:refresh',
-      'portal:close',
-    ]);
+    // dashboard buttons present, incl. stats reusing the existing flow
+    const allButtons = msg.components.flatMap(
+      (row) => (row as { components: { custom_id: string }[] }).components,
+    );
+    const ids = allButtons.map((b) => b.custom_id);
+    expect(ids).toContain('portal:add');
+    expect(ids).toContain('portal:manage');
+    expect(ids).toContain('portal:refresh');
+    expect(ids).toContain('portal:close');
+    expect(ids).toContain('ad:stats:period');
+    // every action row stays within the 5-button limit
+    for (const row of msg.components) {
+      expect((row as { components: unknown[] }).components.length).toBeLessThanOrEqual(5);
+    }
   });
 
   it('handles null budget (no tier) and empty banners', () => {
