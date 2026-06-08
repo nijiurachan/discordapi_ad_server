@@ -33,8 +33,9 @@ describe('isRecentEvent', () => {
     expect(captured[0]?.sql).toMatch(/ad_id = \?/);
     expect(captured[0]?.sql).toMatch(/ip_hash = \?/);
     expect(captured[0]?.sql).toMatch(/event_type = \?/);
-    expect(captured[0]?.sql).toMatch(/make_interval\(secs => \?\)/);
-    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 300]);
+    expect(captured[0]?.sql).toMatch(/ts > \(unixepoch\(\) \* 1000\) - \?/);
+    // SQLite impl compares against epoch-ms; windowMs (default 5min) is passed as-is.
+    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 300000]);
   });
 
   it('returns true when EXISTS row is true', async () => {
@@ -55,25 +56,25 @@ describe('isRecentEvent', () => {
     expect(out).toBe(false);
   });
 
-  it('converts custom windowMs (60000) to 60 seconds', async () => {
+  it('passes custom windowMs (60000) through as epoch-ms', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient([{ rows: [{ exists: false }] }], captured);
     await isRecentEvent(client, 'ad-1', 'iphash', 'impression', 60000);
-    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 60]);
+    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 60000]);
   });
 
-  it('clamps windowMs=0 to 1 second', async () => {
+  it('passes windowMs=0 through unchanged', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient([{ rows: [{ exists: false }] }], captured);
     await isRecentEvent(client, 'ad-1', 'iphash', 'impression', 0);
-    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 1]);
+    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 0]);
   });
 
-  it('clamps very small windowMs (e.g. 100ms → rounds to 0 → clamped to 1s)', async () => {
+  it('passes small windowMs (100ms) through as epoch-ms', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient([{ rows: [{ exists: false }] }], captured);
     await isRecentEvent(client, 'ad-1', 'iphash', 'impression', 100);
-    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 1]);
+    expect(captured[0]?.params).toEqual(['ad-1', 'iphash', 'impression', 100]);
   });
 });
 
@@ -108,13 +109,11 @@ describe('insertAdEvent', () => {
 });
 
 describe('insertEventIfNotRecent', () => {
-  it('returns ok=true with insertedId on happy path and captures all 6 params', async () => {
+  it('returns ok=true with insertedId on happy path and captures all 9 params', async () => {
     const captured: CapturedCall[] = [];
-    // Response sequence: BEGIN, advisory lock SELECT, INSERT (returns row), COMMIT.
-    const client = mockClient(
-      [{ rows: [] }, { rows: [] }, { rows: [{ id: '42' }] }, { rows: [] }],
-      captured,
-    );
+    // SQLite impl is a single atomic INSERT ... SELECT ... WHERE NOT EXISTS statement;
+    // no BEGIN / advisory lock / COMMIT (D1 has no interactive tx).
+    const client = mockClient([{ rows: [{ id: '42' }] }], captured);
     const out = await insertEventIfNotRecent(client, {
       adId: 'ad-1',
       eventType: 'impression',
@@ -123,27 +122,27 @@ describe('insertEventIfNotRecent', () => {
       slot: 'default',
     });
     expect(out).toEqual({ ok: true, insertedId: 42n });
-    // The INSERT is the third query (after BEGIN + advisory lock).
-    expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
-    expect(captured[2]?.sql).toMatch(/WHERE NOT EXISTS/);
-    expect(captured[2]?.sql).toMatch(/make_interval\(secs => \?\)/);
-    expect(captured[2]?.sql).toMatch(/RETURNING id::text/);
-    expect(captured[2]?.params).toEqual([
+    // The INSERT is the only query.
+    expect(captured[0]?.sql).toMatch(/INSERT INTO ad_events/);
+    expect(captured[0]?.sql).toMatch(/WHERE NOT EXISTS/);
+    expect(captured[0]?.sql).toMatch(/ts > \(unixepoch\(\) \* 1000\) - \?/);
+    expect(captured[0]?.sql).toMatch(/RETURNING id/);
+    expect(captured[0]?.params).toEqual([
       'ad-1',
       'impression',
       'iphash',
       'Mozilla/5.0',
       'default',
-      300,
+      'ad-1',
+      'iphash',
+      'impression',
+      300000,
     ]);
   });
 
-  it('advisory lock SQL is issued before INSERT and wrapped in BEGIN/COMMIT', async () => {
+  it('issues a single INSERT statement without BEGIN/lock/COMMIT', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient(
-      [{ rows: [] }, { rows: [] }, { rows: [{ id: '7' }] }, { rows: [] }],
-      captured,
-    );
+    const client = mockClient([{ rows: [{ id: '7' }] }], captured);
     await insertEventIfNotRecent(client, {
       adId: 'ad-1',
       eventType: 'click',
@@ -151,17 +150,14 @@ describe('insertEventIfNotRecent', () => {
       ua: null,
       slot: null,
     });
-    expect(captured).toHaveLength(4);
-    expect(captured[0]?.sql).toBe('BEGIN');
-    expect(captured[1]?.sql).toMatch(/pg_advisory_xact_lock\(hashtextextended\(/);
-    expect(captured[1]?.params).toEqual(['ad-1|iphash|click']);
-    expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
-    expect(captured[3]?.sql).toBe('COMMIT');
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.sql).toMatch(/INSERT INTO ad_events/);
+    expect(captured[0]?.sql).toMatch(/WHERE NOT EXISTS/);
   });
 
   it('returns ok=false reason=duplicate when no row inserted', async () => {
-    // INSERT (3rd query) returns no rows → duplicate.
-    const client = mockClient([{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }]);
+    // INSERT returns no rows → suppressed by dedup window → duplicate.
+    const client = mockClient([{ rows: [] }]);
     const out = await insertEventIfNotRecent(client, {
       adId: 'ad-1',
       eventType: 'click',
@@ -172,12 +168,9 @@ describe('insertEventIfNotRecent', () => {
     expect(out).toEqual({ ok: false, reason: 'duplicate' });
   });
 
-  it('converts custom windowMs (60000) to 60 seconds in SQL params', async () => {
+  it('passes custom windowMs (60000) through as epoch-ms in SQL params', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient(
-      [{ rows: [] }, { rows: [] }, { rows: [{ id: '1' }] }, { rows: [] }],
-      captured,
-    );
+    const client = mockClient([{ rows: [{ id: '1' }] }], captured);
     await insertEventIfNotRecent(
       client,
       {
@@ -189,15 +182,12 @@ describe('insertEventIfNotRecent', () => {
       },
       60000,
     );
-    expect(captured[2]?.params?.[5]).toBe(60);
+    expect(captured[0]?.params?.[8]).toBe(60000);
   });
 
-  it('clamps windowMs=0 to 1 second', async () => {
+  it('passes windowMs=0 through unchanged', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient(
-      [{ rows: [] }, { rows: [] }, { rows: [{ id: '1' }] }, { rows: [] }],
-      captured,
-    );
+    const client = mockClient([{ rows: [{ id: '1' }] }], captured);
     await insertEventIfNotRecent(
       client,
       {
@@ -209,10 +199,10 @@ describe('insertEventIfNotRecent', () => {
       },
       0,
     );
-    expect(captured[2]?.params?.[5]).toBe(1);
+    expect(captured[0]?.params?.[8]).toBe(0);
   });
 
-  it('rolls back when INSERT throws and rethrows the error', async () => {
+  it('rethrows when the INSERT throws (no rollback needed — single statement)', async () => {
     const captured: CapturedCall[] = [];
     const client: PgClient = {
       query: vi.fn(async (sql: string, params?: unknown[]) => {
@@ -233,9 +223,7 @@ describe('insertEventIfNotRecent', () => {
         slot: null,
       }),
     ).rejects.toThrow('insert boom');
-    expect(captured[0]?.sql).toBe('BEGIN');
-    expect(captured[1]?.sql).toMatch(/pg_advisory_xact_lock/);
-    expect(captured[2]?.sql).toMatch(/INSERT INTO ad_events/);
-    expect(captured[captured.length - 1]?.sql).toBe('ROLLBACK');
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.sql).toMatch(/INSERT INTO ad_events/);
   });
 });

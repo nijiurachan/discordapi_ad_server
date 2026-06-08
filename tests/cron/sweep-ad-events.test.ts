@@ -23,12 +23,25 @@ describe('sweepAdEvents', () => {
     const result = await sweepAdEvents(client);
     expect(result).toEqual({ batches: 3, deleted: 2350, hitMaxBatches: false });
     expect(captured).toHaveLength(4);
+    // Retention horizon is computed in JS as epoch-ms (SQLite has no interval
+    // literal): cutoff = Date.now() - 180 days. Source hoists Date.now() out of
+    // the loop, so every batch shares the same cutoff param.
+    const RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+    const before = Date.now() - RETENTION_MS;
     for (const c of captured) {
       expect(c.sql).toMatch(/DELETE FROM ad_events/);
-      expect(c.sql).toMatch(/180 days/);
+      expect(c.sql).toMatch(/WHERE ts < \?/);
       expect(c.sql).toMatch(/LIMIT \?/);
-      expect(c.params).toEqual([1000]);
+      expect(c.params).toHaveLength(2);
+      const [cutoff, limit] = c.params as [number, number];
+      // cutoff is ~180 days ago in epoch-ms (allow a small clock window).
+      expect(cutoff).toBeGreaterThanOrEqual(before - 5000);
+      expect(cutoff).toBeLessThanOrEqual(Date.now() - RETENTION_MS + 5000);
+      expect(limit).toBe(1000);
     }
+    // All batches share the identical hoisted cutoff.
+    const cutoffs = captured.map((c) => (c.params as [number, number])[0]);
+    expect(new Set(cutoffs).size).toBe(1);
   });
 
   it('respects custom batchSize', async () => {
@@ -36,7 +49,9 @@ describe('sweepAdEvents', () => {
     const client = mockClient([10, 0], captured);
     const result = await sweepAdEvents(client, { batchSize: 10 });
     expect(result.deleted).toBe(10);
-    expect(captured[0]?.params).toEqual([10]);
+    // params = [cutoff (epoch-ms), batchSize]; batchSize is the second param.
+    expect(captured[0]?.params).toHaveLength(2);
+    expect((captured[0]?.params as [number, number])[1]).toBe(10);
   });
 
   it('stops at maxBatches and reports hitMaxBatches=true', async () => {

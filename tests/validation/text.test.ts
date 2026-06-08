@@ -63,10 +63,9 @@ describe('validateBody', () => {
 });
 
 describe('validateLinkUrl', () => {
-  it('rejects empty url', () => {
+  it('accepts empty url (link is optional)', () => {
     const r = validateLinkUrl(buildRules(), '');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain('リンク URL を入力');
+    expect(r.ok).toBe(true);
   });
 
   it('rejects oversized url', () => {

@@ -79,7 +79,12 @@ describe('runAdStats', () => {
     expect(json.data.content).toContain('インプレッション: 100');
     expect(json.data.content).toContain('クリック: 5');
     expect(json.data.content).toContain('CTR: 5.00%');
-    expect(captured[0]?.sql).toContain("interval '24 hours'");
+    // SQLite has no `interval` literal: the rolling window is a JS-computed
+    // epoch-ms cutoff passed as the first `?` param (Date.now() - 24h).
+    expect(captured[0]?.sql).toContain('e.ts >= ?');
+    const cutoff = (captured[0]?.params as unknown[])[0] as number;
+    const expected = Date.now() - 24 * 60 * 60 * 1000;
+    expect(Math.abs(cutoff - expected)).toBeLessThan(5_000);
   });
 
   it('7d: includes 7 days interval', async () => {
@@ -89,7 +94,10 @@ describe('runAdStats', () => {
       captured,
     );
     await invokeStats(client, 'user-1', '7d');
-    expect(captured[0]?.sql).toContain("interval '7 days'");
+    expect(captured[0]?.sql).toContain('e.ts >= ?');
+    const cutoff = (captured[0]?.params as unknown[])[0] as number;
+    const expected = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(cutoff - expected)).toBeLessThan(5_000);
   });
 
   it('30d: includes 30 days interval', async () => {
@@ -99,17 +107,24 @@ describe('runAdStats', () => {
       captured,
     );
     await invokeStats(client, 'user-1', '30d');
-    expect(captured[0]?.sql).toContain("interval '30 days'");
+    expect(captured[0]?.sql).toContain('e.ts >= ?');
+    const cutoff = (captured[0]?.params as unknown[])[0] as number;
+    const expected = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(cutoff - expected)).toBeLessThan(5_000);
   });
 
-  it('all: omits interval clause', async () => {
+  it('all: omits the rolling-window cutoff clause', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [{ rows: [{ impressions: '0', clicks: '0', ad_count: '0' }] }],
       captured,
     );
     await invokeStats(client, 'user-1', 'all');
+    // No `interval` literal and no `e.ts >= ?` cutoff for the all-time period;
+    // the only bound param is the sponsor id.
     expect(captured[0]?.sql).not.toContain('interval');
+    expect(captured[0]?.sql).not.toContain('e.ts >= ?');
+    expect(captured[0]?.params).toEqual(['user-1']);
   });
 
   it('0 impressions → CTR 0.00%, no divide-by-zero', async () => {

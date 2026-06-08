@@ -34,10 +34,10 @@ describe('updateAdStatusOptimistic', () => {
     expect(result).toEqual({ ok: true, rowsAffected: 1 });
     expect(captured).toHaveLength(1);
     expect(first(captured).sql).toBe('UPDATE ads SET status = ? WHERE id = ? AND status = ?');
-    expect(first(captured).params).toEqual(['ad-1', 'pending', 'approved']);
+    expect(first(captured).params).toEqual(['approved', 'ad-1', 'pending']);
   });
 
-  it('builds SQL with reject_reason + reviewed_by + status (and reviewed_at = now())', async () => {
+  it('builds SQL with reject_reason + reviewed_by + status (and reviewed_at = unixepoch ms)', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(1, captured);
     await updateAdStatusOptimistic(client, 'ad-1', 'pending', {
@@ -49,12 +49,12 @@ describe('updateAdStatusOptimistic', () => {
     expect(sql).toContain('status = ?');
     expect(sql).toContain('reject_reason = ?');
     expect(sql).toContain('reviewed_by = ?');
-    expect(sql).toContain('reviewed_at = now()');
+    expect(sql).toContain('reviewed_at = (unixepoch() * 1000)');
     expect(sql).toContain('WHERE id = ? AND status = ?');
-    expect(first(captured).params).toEqual(['ad-1', 'pending', 'rejected', 'spam', 'reviewer-1']);
+    expect(first(captured).params).toEqual(['rejected', 'spam', 'reviewer-1', 'ad-1', 'pending']);
   });
 
-  it('uses starts_at = now() literal when patch.startsAt === "now"', async () => {
+  it('uses starts_at = (unixepoch() * 1000) literal when patch.startsAt === "now"', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(1, captured);
     await updateAdStatusOptimistic(client, 'ad-1', 'pending', {
@@ -64,10 +64,10 @@ describe('updateAdStatusOptimistic', () => {
       weightSnapshot: 10,
     });
     const sql = first(captured).sql;
-    expect(sql).toContain('starts_at = now()');
+    expect(sql).toContain('starts_at = (unixepoch() * 1000)');
     // starts_at literal should not consume a parameter slot — weight_snapshot follows reviewed_by (?)
     expect(sql).toContain('weight_snapshot = ?');
-    expect(first(captured).params).toEqual(['ad-1', 'pending', 'approved', 'reviewer-1', 10]);
+    expect(first(captured).params).toEqual(['approved', 'reviewer-1', 10, 'ad-1', 'pending']);
   });
 
   it('returns { ok: false, reason: "race" } when rowCount is 0', async () => {
@@ -96,7 +96,8 @@ describe('updateAdStatusOptimistic', () => {
     });
     const sql = first(captured).sql;
     expect(sql).toContain('starts_at = ?');
-    expect(first(captured).params).toEqual(['ad-1', 'pending', 'approved', startDate]);
+    // Date is converted to epoch ms for the SQLite integer column.
+    expect(first(captured).params).toEqual(['approved', startDate.getTime(), 'ad-1', 'pending']);
   });
 
   it('handles null rejectReason explicitly (Object.hasOwn keeps the column in SET)', async () => {
@@ -108,7 +109,7 @@ describe('updateAdStatusOptimistic', () => {
     });
     const sql = first(captured).sql;
     expect(sql).toContain('reject_reason = ?');
-    expect(first(captured).params).toEqual(['ad-1', 'rejected', 'approved', null]);
+    expect(first(captured).params).toEqual(['approved', null, 'ad-1', 'rejected']);
   });
 });
 

@@ -46,7 +46,9 @@ describe('getSystemSetting', () => {
 
   it('returns the stored value when a row exists', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient([{ rows: [{ value: 'msg-123' }] }], captured);
+    // `value` is stored as JSON text in D1/SQLite (was jsonb in Postgres), so
+    // the row holds the JSON-encoded string and getSystemSetting JSON.parses it.
+    const client = mockClient([{ rows: [{ value: JSON.stringify('msg-123') }] }], captured);
     const value = await getSystemSetting<string>(client, SystemSettingKey.SUBMIT_MENU_MESSAGE_ID);
     expect(value).toBe('msg-123');
     expect(captured[0]?.params).toEqual(['menu.submit.message_id']);

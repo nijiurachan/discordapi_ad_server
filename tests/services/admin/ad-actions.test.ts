@@ -92,7 +92,7 @@ describe('forceEndAdAction', () => {
     expect(result.ok).toBe(true);
     const updateSql = captured[1]?.sql ?? '';
     expect(updateSql).toContain("status = 'expired'");
-    expect(updateSql).toContain('ends_at = now()');
+    expect(updateSql).toContain('ends_at = (unixepoch() * 1000)');
   });
 
   it('rejects ads in non-active status (e.g. expired)', async () => {

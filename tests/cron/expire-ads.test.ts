@@ -25,7 +25,7 @@ describe('expireAds', () => {
     expect(sql).toMatch(/SET status = 'expired'/);
     expect(sql).toMatch(/status = 'approved'/);
     expect(sql).toMatch(/ends_at IS NOT NULL/);
-    expect(sql).toMatch(/ends_at < now\(\)/);
+    expect(sql).toMatch(/ends_at < \(unixepoch\(\) \* 1000\)/);
   });
 
   it('reports zero when nothing matches', async () => {

@@ -33,8 +33,10 @@ describe('repostAdminMenu', () => {
 
   it('deletes the old message (best-effort) and posts a new menu', async () => {
     const client = mockClient([
-      { rows: [{ value: 'chan-admin' }] }, // ADMIN_MENU_CHANNEL_ID
-      { rows: [{ value: 'msg-old' }] }, // ADMIN_MENU_MESSAGE_ID
+      // `value` is JSON text in D1/SQLite (was jsonb in Postgres); getSystemSetting
+      // JSON.parses it, so fixtures must be JSON-encoded strings.
+      { rows: [{ value: JSON.stringify('chan-admin') }] }, // ADMIN_MENU_CHANNEL_ID
+      { rows: [{ value: JSON.stringify('msg-old') }] }, // ADMIN_MENU_MESSAGE_ID
       { rowCount: 1 }, // setSystemSetting (UPSERT)
       { rowCount: 1 }, // writeAdminLog
     ]);

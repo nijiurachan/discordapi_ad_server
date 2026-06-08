@@ -51,7 +51,7 @@ describe('sweepExpiredDrafts', () => {
     // One round-trip only: the DELETE itself returns the keys to clean.
     expect(captured).toHaveLength(1);
     expect(captured[0]?.sql).toMatch(
-      /DELETE FROM ad_drafts WHERE expires_at < now\(\) RETURNING id, image_key/,
+      /DELETE FROM ad_drafts WHERE expires_at < \(unixepoch\(\) \* 1000\) RETURNING id, image_key/,
     );
   });
 

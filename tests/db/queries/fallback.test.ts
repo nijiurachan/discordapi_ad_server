@@ -45,7 +45,7 @@ describe('findActiveFallback', () => {
     });
     expect(captured[0]?.sql).toMatch(/FROM dm_fallback_channels/);
     expect(captured[0]?.sql).toMatch(/acknowledged_at IS NULL/);
-    expect(captured[0]?.sql).toMatch(/expires_at > now\(\)/);
+    expect(captured[0]?.sql).toMatch(/expires_at > \(unixepoch\(\) \* 1000\)/);
     expect(captured[0]?.params).toEqual(['ad-1']);
   });
 
@@ -92,11 +92,13 @@ describe('findFallbackById', () => {
 });
 
 describe('markFallbackAcknowledged', () => {
-  it('issues UPDATE with acknowledged_at = now() and id guard', async () => {
+  it('issues UPDATE with acknowledged_at = (unixepoch() * 1000) and id guard', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient([], captured);
     await markFallbackAcknowledged(client, 'fb-1');
-    expect(captured[0]?.sql).toMatch(/UPDATE dm_fallback_channels SET acknowledged_at = now\(\)/);
+    expect(captured[0]?.sql).toMatch(
+      /UPDATE dm_fallback_channels SET acknowledged_at = \(unixepoch\(\) \* 1000\)/,
+    );
     expect(captured[0]?.sql).toMatch(/WHERE id = \? AND acknowledged_at IS NULL/);
     expect(captured[0]?.params).toEqual(['fb-1']);
   });

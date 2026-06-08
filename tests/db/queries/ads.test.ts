@@ -89,7 +89,7 @@ describe('withdrawAd', () => {
     const res = await withdrawAd(client, 'user-1', 'ad-1');
     expect(res).toEqual({ ok: true });
     expect(captured[0]?.sql).toBe('BEGIN');
-    expect(captured[1]?.sql).toMatch(/SELECT sponsor_id, status FROM ads.*FOR UPDATE/s);
+    expect(captured[1]?.sql).toMatch(/SELECT sponsor_id, status FROM ads WHERE id = \?/);
     expect(captured[2]?.sql).toMatch(/UPDATE ads/);
     expect(captured[2]?.sql).toMatch(/status = 'withdrawn'/);
     expect(captured[3]?.sql).toMatch(/INSERT INTO review_logs/);
@@ -168,13 +168,21 @@ describe('getAggregateStats', () => {
       [{ rows: [{ impressions: '100', clicks: '10', ad_count: '3' }] }],
       captured,
     );
+    const before = Date.now();
     const res = await getAggregateStats(client, 'user-1', '24h');
+    const after = Date.now();
     expect(res).toEqual({ impressions: 100, clicks: 10, ctr: 0.1, adCount: 3 });
     expect(captured[0]?.sql).toContain('ad_events');
     expect(captured[0]?.sql).toContain("COUNT(*) FILTER (WHERE e.event_type = 'impression')");
     expect(captured[0]?.sql).toContain("COUNT(*) FILTER (WHERE e.event_type = 'click')");
-    expect(captured[0]?.sql).toContain("e.ts >= now() - interval '24 hours'");
-    expect(captured[0]?.params).toEqual(['user-1']);
+    expect(captured[0]?.sql).toContain('AND e.ts >= ?');
+    // Cutoff is computed in JS as epoch-ms (Date.now() - 24h) and passed as the
+    // first parameter, followed by sponsorId.
+    const cutoff = captured[0]?.params?.[0] as number;
+    const windowMs = 24 * 60 * 60 * 1000;
+    expect(cutoff).toBeGreaterThanOrEqual(before - windowMs);
+    expect(cutoff).toBeLessThanOrEqual(after - windowMs);
+    expect(captured[0]?.params?.[1]).toBe('user-1');
   });
 
   it("includes 7d interval clause for period='7d'", async () => {
@@ -183,9 +191,16 @@ describe('getAggregateStats', () => {
       [{ rows: [{ impressions: '0', clicks: '0', ad_count: '0' }] }],
       captured,
     );
+    const before = Date.now();
     await getAggregateStats(client, 'user-1', '7d');
+    const after = Date.now();
     expect(captured[0]?.sql).toContain('ad_events');
-    expect(captured[0]?.sql).toContain("e.ts >= now() - interval '7 days'");
+    expect(captured[0]?.sql).toContain('AND e.ts >= ?');
+    const cutoff = captured[0]?.params?.[0] as number;
+    const windowMs = 7 * 24 * 60 * 60 * 1000;
+    expect(cutoff).toBeGreaterThanOrEqual(before - windowMs);
+    expect(cutoff).toBeLessThanOrEqual(after - windowMs);
+    expect(captured[0]?.params?.[1]).toBe('user-1');
   });
 
   it("includes 30d interval clause for period='30d'", async () => {
@@ -194,9 +209,16 @@ describe('getAggregateStats', () => {
       [{ rows: [{ impressions: '0', clicks: '0', ad_count: '0' }] }],
       captured,
     );
+    const before = Date.now();
     await getAggregateStats(client, 'user-1', '30d');
+    const after = Date.now();
     expect(captured[0]?.sql).toContain('ad_events');
-    expect(captured[0]?.sql).toContain("e.ts >= now() - interval '30 days'");
+    expect(captured[0]?.sql).toContain('AND e.ts >= ?');
+    const cutoff = captured[0]?.params?.[0] as number;
+    const windowMs = 30 * 24 * 60 * 60 * 1000;
+    expect(cutoff).toBeGreaterThanOrEqual(before - windowMs);
+    expect(cutoff).toBeLessThanOrEqual(after - windowMs);
+    expect(captured[0]?.params?.[1]).toBe('user-1');
   });
 
   it("omits day condition for period='all'", async () => {

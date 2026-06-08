@@ -27,32 +27,32 @@ describe('getDailySalt', () => {
 
   it('returns the salt when row has valid { salt: "abcd" }', async () => {
     const captured: CapturedCall[] = [];
-    const client = mockClient([{ rows: [{ value: { salt: 'abcd' } }] }], captured);
+    const client = mockClient([{ rows: [{ value: JSON.stringify({ salt: 'abcd' }) }] }], captured);
     const out = await getDailySalt(client, 'bootstrap-salt');
     expect(out).toBe('abcd');
     expect(captured[0]?.params).toEqual(['ip_hash_salt']);
   });
 
   it('returns fallback when JSON shape has no salt key', async () => {
-    const client = mockClient([{ rows: [{ value: { other: 'whatever' } }] }]);
+    const client = mockClient([{ rows: [{ value: JSON.stringify({ other: 'whatever' }) }] }]);
     const out = await getDailySalt(client, 'bootstrap-salt');
     expect(out).toBe('bootstrap-salt');
   });
 
   it('returns fallback when salt is empty string', async () => {
-    const client = mockClient([{ rows: [{ value: { salt: '' } }] }]);
+    const client = mockClient([{ rows: [{ value: JSON.stringify({ salt: '' }) }] }]);
     const out = await getDailySalt(client, 'bootstrap-salt');
     expect(out).toBe('bootstrap-salt');
   });
 
   it('returns fallback when salt is whitespace-only (spaces)', async () => {
-    const client = mockClient([{ rows: [{ value: { salt: '   ' } }] }]);
+    const client = mockClient([{ rows: [{ value: JSON.stringify({ salt: '   ' }) }] }]);
     const out = await getDailySalt(client, 'fallback-x');
     expect(out).toBe('fallback-x');
   });
 
   it('returns fallback when salt is tab/newline-only', async () => {
-    const client = mockClient([{ rows: [{ value: { salt: '\t\n' } }] }]);
+    const client = mockClient([{ rows: [{ value: JSON.stringify({ salt: '\t\n' }) }] }]);
     const out = await getDailySalt(client, 'fallback-x');
     expect(out).toBe('fallback-x');
   });

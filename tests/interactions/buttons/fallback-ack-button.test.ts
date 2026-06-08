@@ -175,7 +175,7 @@ describe('runAckButton', () => {
     expect(captured[captured.length - 1]?.sql).toMatch(/^COMMIT/);
 
     const ackUpdate = captured.find((c) =>
-      /UPDATE dm_fallback_channels SET acknowledged_at = now\(\)/.test(c.sql),
+      /UPDATE dm_fallback_channels SET acknowledged_at = \(unixepoch\(\) \* 1000\)/.test(c.sql),
     );
     expect(ackUpdate).toBeDefined();
     expect(ackUpdate?.params).toEqual([FALLBACK_ID]);
