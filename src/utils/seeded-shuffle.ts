@@ -115,10 +115,7 @@ function trySwap<T>(arr: T[], i: number, j: number, keyOf: (v: T) => unknown): b
  * Deterministic given the input, so callers can cache the result by deck
  * identity (we exploit this via the serve_rotation table).
  */
-export function spreadShuffle<T>(
-  deck: readonly T[],
-  keyOf: (v: T) => unknown = (v) => v,
-): T[] {
+export function spreadShuffle<T>(deck: readonly T[], keyOf: (v: T) => unknown = (v) => v): T[] {
   if (deck.length <= 1) return deck.slice();
   const result = deck.slice();
   // Four passes is plenty: each pass at most halves the residual duplicate

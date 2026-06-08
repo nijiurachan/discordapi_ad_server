@@ -21,7 +21,9 @@ describe('spreadShuffle keyOf', () => {
     const out = spreadShuffle(deck, (id) => sponsorOf[id] ?? id);
     let adjSameSponsor = 0;
     for (let i = 1; i < out.length; i++) {
-      if ((sponsorOf[out[i] as string] ?? out[i]) === (sponsorOf[out[i - 1] as string] ?? out[i - 1])) {
+      if (
+        (sponsorOf[out[i] as string] ?? out[i]) === (sponsorOf[out[i - 1] as string] ?? out[i - 1])
+      ) {
         adjSameSponsor++;
       }
     }
@@ -44,14 +46,22 @@ describe('spreadShuffle keyOf', () => {
     // same-sponsor adjacencies for one sponsor with count m out of N is
     // m - (N - m) - 1 = 2m - N - 1 = 2*5 - 8 - 1 = 1. Assert we hit that bound.
     const sponsorOf: Record<string, string> = {
-      a1: 'A', a2: 'A', a3: 'A', a4: 'A', a5: 'A',
-      b1: 'B', c1: 'C', d1: 'D',
+      a1: 'A',
+      a2: 'A',
+      a3: 'A',
+      a4: 'A',
+      a5: 'A',
+      b1: 'B',
+      c1: 'C',
+      d1: 'D',
     };
     const deck = ['a1', 'a2', 'a3', 'a4', 'a5', 'b1', 'c1', 'd1'];
     const out = spreadShuffle(deck, (id) => sponsorOf[id] ?? id);
     let adjSameSponsor = 0;
     for (let i = 1; i < out.length; i++) {
-      if ((sponsorOf[out[i] as string] ?? out[i]) === (sponsorOf[out[i - 1] as string] ?? out[i - 1])) {
+      if (
+        (sponsorOf[out[i] as string] ?? out[i]) === (sponsorOf[out[i - 1] as string] ?? out[i - 1])
+      ) {
         adjSameSponsor++;
       }
     }
