@@ -21,6 +21,7 @@ function mockClient(opts: {
   portalRow?: Record<string, unknown> | null;
   allocs?: Array<{ id: string; weight_alloc: number | null }>;
   banners?: Array<Record<string, unknown>>;
+  tiers?: Array<Record<string, unknown>>; // rows returned to refreshSponsorTier
 }): PgClient {
   return {
     query: vi.fn(async (sql: string, params?: unknown[]) => {
@@ -28,6 +29,14 @@ function mockClient(opts: {
       // atomic ownership+budget guarded weight UPDATE
       if (/UPDATE ads\s+SET weight_alloc/.test(sql)) {
         return { rows: [], rowCount: opts.weightUpdateRowCount };
+      }
+      // refreshSponsorTier: all tiers ordered by rank desc
+      if (/FROM tiers ORDER BY rank DESC/.test(sql)) {
+        return { rows: opts.tiers ?? [] };
+      }
+      // refreshSponsorTier: sponsor UPSERT
+      if (/INSERT INTO sponsors/.test(sql)) {
+        return { rows: [], rowCount: 1 };
       }
       // getSponsorBudget tier lookup
       if (/SELECT t\.weight\s+FROM sponsors s\s+JOIN tiers t/.test(sql)) {
@@ -63,10 +72,11 @@ function mockClient(opts: {
   } as unknown as PgClient;
 }
 
-function mockRest(): DiscordRest {
+function mockRest(roles: string[] = []): DiscordRest {
   return {
     editMessage: vi.fn(async () => ({ id: 'm-1', channel_id: 'c-1' })),
     createMessage: vi.fn(async () => ({ id: 'm-2', channel_id: 'c-1' })),
+    getGuildMember: vi.fn(async () => ({ roles })),
   } as unknown as DiscordRest;
 }
 
@@ -97,10 +107,10 @@ function payload(weight: string, adId = 'a-9', clicker = 's-1'): ModalSubmitInte
 
 async function invoke(
   p: ModalSubmitInteractionPayload,
-  deps: PortalWeightModalDeps,
+  deps: Omit<PortalWeightModalDeps, 'guildId'> & { guildId?: string },
 ): Promise<Response> {
   const app = new Hono<{ Bindings: Bindings }>();
-  app.post('/', (c) => runPortalWeightModal(c, p, deps));
+  app.post('/', (c) => runPortalWeightModal(c, p, { guildId: 'g-1', ...deps }));
   return app.request('http://test/', { method: 'POST' });
 }
 
@@ -157,6 +167,43 @@ describe('runPortalWeightModal — C success (within budget)', () => {
     expect(captured.some((c) => /UPDATE portal_channels SET last_active_at/.test(c.sql))).toBe(
       true,
     );
+  });
+
+  it("re-renders the dashboard with the sponsor's real plan name (not the unassigned fallback)", async () => {
+    const captured: CapturedCall[] = [];
+    // The clicker holds the role that maps to the 'ゴールド' tier, so
+    // refreshSponsorTier resolves a real tier name for the re-render.
+    const rest = mockRest(['role-gold']);
+    const client = mockClient({
+      captured,
+      weightUpdateRowCount: 1,
+      tierWeight: 10,
+      usedAfter: 7,
+      portalRow,
+      allocs: [{ id: 'a-9', weight_alloc: 5 }],
+      banners: [
+        { id: 'a-9', slot: 'default', title: 'Promo', status: 'approved', weight_alloc: 5 },
+      ],
+      tiers: [
+        {
+          id: 2,
+          discordRoleId: 'role-gold',
+          name: 'ゴールド',
+          weight: 10,
+          maxActiveAds: 5,
+          rank: 2,
+        },
+      ],
+    });
+    await invoke(payload('5'), { rest, client });
+
+    const editCall = (rest.editMessage as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = editCall?.[2] as {
+      embeds: Array<{ fields: Array<{ name: string; value: string }> }>;
+    };
+    const planField = body.embeds[0]?.fields.find((f) => f.name === 'プラン');
+    expect(planField?.value).toBe('ゴールド');
+    expect(planField?.value).not.toBe('（ティアロール未付与）');
   });
 });
 

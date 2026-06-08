@@ -11,7 +11,7 @@ import { type DiscordRest, createDiscordRest } from '../../discord/rest.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { buildPortalDashboard } from '../../services/portal/render.ts';
-import { effectiveWeights, getSponsorBudget } from '../../sponsors/tier.ts';
+import { effectiveWeights, getSponsorBudget, refreshSponsorTier } from '../../sponsors/tier.ts';
 import { ephemeral } from '../responses.ts';
 
 export const WEIGHT_MODAL_PREFIX = 'portal:weight-modal:';
@@ -19,6 +19,7 @@ export const WEIGHT_MODAL_PREFIX = 'portal:weight-modal:';
 export type PortalWeightModalDeps = {
   rest: DiscordRest;
   client: PgClient;
+  guildId: string;
 };
 
 function findTextValue(payload: ModalSubmitInteractionPayload, customId: string): string {
@@ -68,6 +69,8 @@ export async function runPortalWeightModal(
 
   const clickerId = payload.member?.user.id ?? payload.user?.id ?? '';
   if (!clickerId) return ephemeral(c, 'ユーザー情報を取得できませんでした。');
+  const displayName =
+    payload.member?.user.username ?? payload.user?.username ?? clickerId ?? 'unknown';
 
   // 2. parse + validate input (§3.C-3.1: integer, >= 1; else ephemeral error)
   const newWeight = parseWeight(findTextValue(payload, 'weight'));
@@ -90,16 +93,18 @@ export async function runPortalWeightModal(
   // (§3.C-3.3 — REUSE getSponsorActiveRegularAllocs + effectiveWeights +
   // applyEffectiveWeights, the single source of truth shared with approve/cron).
   // serve_rotation's signature changes ⇒ next /serve rebuilds the deck.
+  // Single budget read: the value is identical before/after applyEffectiveWeights
+  // because the guard guarantees Σalloc <= tierWeight (so no banner is paused) and
+  // applyEffectiveWeights only writes weight_snapshot, which sumActiveWeight (over
+  // weight_alloc) never reads. Reuse it for both the recalc tierWeight and the
+  // confirmation 'remaining'.
   const budget = await getSponsorBudget(deps.client, clickerId);
   if (budget) {
     const allocs = await getSponsorActiveRegularAllocs(deps.client, clickerId);
     const eff = effectiveWeights(allocs, budget.tierWeight);
     await applyEffectiveWeights(deps.client, eff.weights, eff.paused);
   }
-
-  // remaining budget AFTER the change, for the confirmation message.
-  const after = budget ? await getSponsorBudget(deps.client, clickerId) : null;
-  const remaining = after?.remaining ?? 0;
+  const remaining = budget?.remaining ?? 0;
 
   // 5. re-render the dashboard in place (§3.C-3.4 — REUSE findOpenPortalBySponsor
   // + buildPortalDashboard + editMessage + touchPortalActivity). Skip silently if
@@ -108,11 +113,30 @@ export async function runPortalWeightModal(
   const portal = await findOpenPortalBySponsor(deps.client, clickerId);
   if (portal?.dashboardMessageId) {
     try {
+      // Resolve the real plan name the same way the portal:refresh arm does so
+      // the dashboard's 'プラン' field shows the tier (not the unassigned
+      // fallback) for tiered sponsors. Mirror refresh's try/catch fallback.
+      let tierName: string | null = null;
+      try {
+        const tier = await refreshSponsorTier({
+          rest: deps.rest,
+          client: deps.client,
+          guildId: deps.guildId,
+          userId: clickerId,
+          displayName,
+        });
+        tierName = tier?.name ?? null;
+      } catch (err) {
+        console.error('portal-weight-modal: refreshSponsorTier failed', {
+          userId: clickerId,
+          err,
+        });
+      }
       const banners = await getSponsorActiveBanners(deps.client, clickerId);
       const dashboard = buildPortalDashboard({
-        tierName: null,
-        budget: after,
-        maxActiveAds: after?.tierWeight ?? 0,
+        tierName,
+        budget,
+        maxActiveAds: budget?.tierWeight ?? 0,
         usedCount: banners.length,
         banners,
       });
@@ -143,5 +167,6 @@ export async function handlePortalWeightModal(
 ): Promise<Response> {
   const env = c.env;
   const rest = createDiscordRest({ token: env.DISCORD_BOT_TOKEN });
-  return withPgClient(env, (client) => runPortalWeightModal(c, payload, { rest, client }));
+  const guildId = payload.guild_id ?? env.GUILD_ID;
+  return withPgClient(env, (client) => runPortalWeightModal(c, payload, { rest, client, guildId }));
 }

@@ -29,7 +29,7 @@ const ADD_HELP =
 // Discord limits a message to 5 ACTION_ROWs. The management view renders one
 // '重み変更' button per banner, one button per row, so at most 5 banners can
 // carry an edit button. Overflow is noted and the sponsor is pointed at
-// `/ad withdraw` / `/ad list` for the rest.
+// `/ad list` for the rest.
 const MAX_WEIGHT_BUTTONS = 5;
 
 export async function runPortalDashboardButton(
