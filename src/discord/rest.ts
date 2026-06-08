@@ -70,6 +70,8 @@ export function createDiscordRest(o: DiscordRestOptions) {
         'GET',
         `/guilds/${guildId}/members/${userId}`,
       ),
+    editOriginalInteractionResponse: (appId: string, token: string, body: Json) =>
+      request<Message>(opts, 'PATCH', `/webhooks/${appId}/${token}/messages/@original`, body),
   };
 }
 
