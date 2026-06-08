@@ -109,7 +109,9 @@ export async function runApproveButton(
           ? 'スポンサーが設定されていない広告は承認できません。'
           : result.reason === 'no_tier'
             ? '対象スポンサーにティアロールが付与されていません。'
-            : '他のレビュアーが既に処理しました。';
+            : result.reason === 'budget_exceeded'
+              ? 'スポンサーの重み予算を超過しています（ティア降格の可能性）。配分を見直してください。'
+              : '他のレビュアーが既に処理しました。';
     return ephemeral(c, message);
   }
 

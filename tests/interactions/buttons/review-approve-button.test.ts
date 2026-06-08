@@ -333,10 +333,8 @@ describe('runApproveButton', () => {
 
   it('returns ephemeral when sponsor has no tier (no_tier)', async () => {
     const client = mockClient([
-      { rows: [adRow] },
-      { rows: [] }, // BEGIN
-      { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: null }] }, // lookup
-      { rows: [] }, // ROLLBACK
+      { rows: [adRow] }, // snapshot
+      { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: null, weight_alloc: 1 }] }, // lookup
     ]);
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
@@ -348,10 +346,8 @@ describe('runApproveButton', () => {
 
   it('returns ephemeral when sponsor_id is null on the ad (no_sponsor)', async () => {
     const client = mockClient([
-      { rows: [{ ...adRow, sponsor_id: null }] },
-      { rows: [] }, // BEGIN
-      { rows: [{ sponsor_id: null, status: 'pending', weight: 7 }] }, // lookup
-      { rows: [] }, // ROLLBACK
+      { rows: [{ ...adRow, sponsor_id: null }] }, // snapshot
+      { rows: [{ sponsor_id: null, status: 'pending', weight: 7, weight_alloc: 1 }] }, // lookup
     ]);
     const res = await invoke(buildPayload(), defaultDeps(client));
     const json = (await res.json()) as { type: number; data: { content: string } };
@@ -359,15 +355,14 @@ describe('runApproveButton', () => {
     expect(json.data.content).toContain('スポンサー');
   });
 
-  it('returns ephemeral when optimistic UPDATE finds no pending row (race)', async () => {
+  it('returns ephemeral when the atomic approve UPDATE finds no pending row (race)', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [
-        { rows: [adRow] },
-        { rows: [] }, // BEGIN
-        { rows: [tierRow] }, // lookup
-        { rows: [], rowCount: 0 }, // UPDATE — already moved
-        { rows: [] }, // ROLLBACK
+        { rows: [adRow] }, // snapshot
+        { rows: [{ ...tierRow, weight_alloc: 1 }] }, // lookup
+        { rows: [], rowCount: 0 }, // conditional UPDATE — already moved
+        { rows: [{ status: 'approved' }] }, // disambiguation probe
       ],
       captured,
     );
@@ -384,14 +379,13 @@ describe('runApproveButton', () => {
   it('still returns success when embed edit fails (best-effort)', async () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
-      { rows: [adRow] },
-      { rows: [] }, // BEGIN
-      { rows: [tierRow] }, // lookup
-      { rows: [], rowCount: 1 },
-      { rows: [{ starts_at: persistedStartsAt }] },
+      { rows: [adRow] }, // snapshot
+      { rows: [{ ...tierRow, weight_alloc: 7 }] }, // lookup
+      { rows: [], rowCount: 1 }, // atomic approve UPDATE
+      { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+      { rows: [] }, // applyEffectiveWeights UPDATE
+      { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
       { rows: [] }, // INSERT review_logs
-      { rows: [] }, // COMMIT
-      { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest({
       editMessage: vi.fn(async () => {
@@ -408,14 +402,13 @@ describe('runApproveButton', () => {
   it('skips embed edit when review_message_id is missing', async () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
-      { rows: [{ ...adRow, review_message_id: null }] },
-      { rows: [] }, // BEGIN
-      { rows: [tierRow] }, // lookup
-      { rows: [], rowCount: 1 },
-      { rows: [{ starts_at: persistedStartsAt }] },
+      { rows: [{ ...adRow, review_message_id: null }] }, // snapshot
+      { rows: [{ ...tierRow, weight_alloc: 7 }] }, // lookup
+      { rows: [], rowCount: 1 }, // atomic approve UPDATE
+      { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+      { rows: [] }, // applyEffectiveWeights UPDATE
+      { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
       { rows: [] }, // INSERT review_logs
-      { rows: [] }, // COMMIT
-      { rows: [], rowCount: 1 },
     ]);
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
