@@ -15,14 +15,16 @@ import {
 type CapturedCall = { sql: string; params: unknown[] | undefined };
 
 function mockClient(
-  responses: Array<{ rows: unknown[] }>,
+  responses: Array<{ rows: unknown[]; rowCount?: number }>,
   captured: CapturedCall[] = [],
 ): PgClient {
   let i = 0;
   return {
     query: vi.fn(async (sql: string, params?: unknown[]) => {
       captured.push({ sql, params });
-      return responses[i++] ?? { rows: [] };
+      const r = responses[i++];
+      if (!r) return { rows: [], rowCount: 0 };
+      return { rowCount: r.rowCount ?? r.rows.length, ...r };
     }) as unknown as PgClient['query'],
     end: vi.fn(async () => undefined),
   };
@@ -35,7 +37,20 @@ function mockRest(): DiscordRest {
 }
 
 function mockS3(): S3Client {
-  return { send: vi.fn(async () => ({})) } as unknown as S3Client;
+  // copyObject() streams source bytes via GET then PUT (workerd has no DOMParser
+  // for the SDK's CopyObject XML). The GetObject response therefore needs a Body;
+  // every other command resolves to an empty result.
+  return {
+    send: vi.fn(async (cmd: { constructor: { name: string } }) => {
+      if (cmd.constructor.name === 'GetObjectCommand') {
+        return {
+          Body: new Response(new Uint8Array([1, 2, 3])).body,
+          ContentType: 'image/png',
+        };
+      }
+      return {};
+    }),
+  } as unknown as S3Client;
 }
 
 const FUTURE = new Date(Date.now() + 5 * 60 * 1000); // +5min
@@ -50,6 +65,7 @@ const draftRow = {
   image_bytes: 100_000,
   image_width: 800,
   image_height: 800,
+  weight: 1,
   expires_at: FUTURE,
 };
 
@@ -127,7 +143,7 @@ function defaultDeps(client: PgClient, rest = mockRest()): ModalSubmitDeps {
     s3: mockS3(),
     bucket: 'test-bucket',
     reviewChannelId: 'review-chan',
-    workerBaseUrl: 'https://worker.example',
+    s3PublicBaseUrl: 'https://cdn.example',
     uuid: () => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
   };
 }
@@ -141,22 +157,18 @@ describe('runSubmitModal', () => {
     //   1) fetchDraft
     //   2) fetchFormatRules
     //   3) BEGIN
-    //   4) SELECT ... FOR UPDATE  (must return draft row)
-    //   5) fetchTierLimit
-    //   6) countActiveAds
-    //   7) INSERT ads
-    //   8) DELETE ad_drafts
-    //   9) COMMIT
-    //  10) UPDATE ads SET review_message_id (after best-effort embed post)
+    //   4) SELECT id FROM ad_drafts  (must return draft row)
+    //   5) conditional INSERT ads (budget guard) -> rowCount 1
+    //   6) DELETE ad_drafts
+    //   7) COMMIT
+    //   8) UPDATE ads SET review_message_id (after best-effort embed post)
     const client = mockClient(
       [
         { rows: [draftRow] },
         { rows: [formatRulesRow] },
         { rows: [] }, // BEGIN
-        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
-        { rows: [{ max_active_ads: 5 }] },
-        { rows: [{ count: '0' }] },
-        { rows: [] }, // INSERT
+        { rows: [{ id: 'draft-1' }] }, // SELECT id FROM ad_drafts
+        { rows: [], rowCount: 1 }, // conditional INSERT -> 1 row
         { rows: [] }, // DELETE
         { rows: [] }, // COMMIT
         { rows: [] }, // UPDATE review_message_id
@@ -174,7 +186,7 @@ describe('runSubmitModal', () => {
 
     // Transaction control statements ran in order.
     expect(captured.some((c) => /^BEGIN$/.test(c.sql.trim()))).toBe(true);
-    expect(captured.some((c) => /SELECT id FROM ad_drafts.*FOR UPDATE/i.test(c.sql))).toBe(true);
+    expect(captured.some((c) => /SELECT id FROM ad_drafts/i.test(c.sql))).toBe(true);
     expect(captured.some((c) => /^COMMIT$/.test(c.sql.trim()))).toBe(true);
 
     const insert = captured.find((c) => /INSERT INTO ads/.test(c.sql));
@@ -252,19 +264,18 @@ describe('runSubmitModal', () => {
     expect(json.data.content).toContain('スキーム');
   });
 
-  it('returns ephemeral when active ads exceed tier limit (race-condition guard)', async () => {
+  it('returns ephemeral when the conditional INSERT is over budget (race-condition guard)', async () => {
     const captured: CapturedCall[] = [];
-    // Order with the tier recheck inside the tx:
+    // Budget guard is the conditional INSERT itself:
     //   1) fetchDraft, 2) fetchFormatRules, 3) BEGIN,
-    //   4) SELECT FOR UPDATE, 5) fetchTierLimit, 6) countActiveAds, 7) ROLLBACK
+    //   4) SELECT id, 5) conditional INSERT (rowCount 0), 6) ROLLBACK
     const client = mockClient(
       [
         { rows: [draftRow] },
         { rows: [formatRulesRow] },
         { rows: [] }, // BEGIN
-        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
-        { rows: [{ max_active_ads: 2 }] },
-        { rows: [{ count: '5' }] }, // already at/over limit
+        { rows: [{ id: 'draft-1' }] }, // SELECT id FROM ad_drafts
+        { rows: [], rowCount: 0 }, // conditional INSERT -> over budget
         { rows: [] }, // ROLLBACK
       ],
       captured,
@@ -272,34 +283,39 @@ describe('runSubmitModal', () => {
     const res = await invoke(buildPayload(), defaultDeps(client));
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
-    expect(json.data.content).toContain('最大');
+    expect(json.data.content).toContain('予算');
 
-    // Transaction was rolled back — no INSERT and no COMMIT.
+    // Transaction was rolled back — INSERT attempted but no COMMIT.
     expect(captured.some((c) => /^ROLLBACK$/.test(c.sql.trim()))).toBe(true);
     expect(captured.every((c) => !/^COMMIT$/.test(c.sql.trim()))).toBe(true);
-    expect(captured.every((c) => !/INSERT INTO ads/.test(c.sql))).toBe(true);
+    expect(captured.every((c) => !/DELETE FROM ad_drafts/.test(c.sql))).toBe(true);
   });
 
-  it('rolls back and cleans up finalKey when over-limit recheck fails inside the transaction', async () => {
+  it('rolls back and cleans up finalKey when the conditional INSERT is over budget', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
       [
         { rows: [draftRow] },
         { rows: [formatRulesRow] },
         { rows: [] }, // BEGIN
-        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
-        { rows: [{ max_active_ads: 1 }] },
-        { rows: [{ count: '3' }] }, // way over limit
+        { rows: [{ id: 'draft-1' }] }, // SELECT id FROM ad_drafts
+        { rows: [], rowCount: 0 }, // conditional INSERT -> over budget
         { rows: [] }, // ROLLBACK
       ],
       captured,
     );
     // Track each S3 op so we can assert the cleanup DELETE happened on
-    // the freshly-copied finalKey.
+    // the freshly-copied finalKey. copyObject() does GET (needs a Body) + PUT.
     const s3Calls: Array<{ kind: string; key: string }> = [];
     const s3 = {
       send: vi.fn(async (cmd: { constructor: { name: string }; input: { Key: string } }) => {
         s3Calls.push({ kind: cmd.constructor.name, key: cmd.input.Key });
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return {
+            Body: new Response(new Uint8Array([1, 2, 3])).body,
+            ContentType: 'image/png',
+          };
+        }
         return {};
       }),
     } as unknown as S3Client;
@@ -307,16 +323,17 @@ describe('runSubmitModal', () => {
     const res = await invoke(buildPayload(), deps);
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
-    expect(json.data.content).toContain('最大');
+    expect(json.data.content).toContain('予算');
 
-    // ROLLBACK ran and no INSERT/COMMIT happened.
+    // ROLLBACK ran and no DELETE/COMMIT happened.
     expect(captured.some((c) => /^ROLLBACK$/.test(c.sql.trim()))).toBe(true);
     expect(captured.every((c) => !/^COMMIT$/.test(c.sql.trim()))).toBe(true);
-    expect(captured.every((c) => !/INSERT INTO ads/.test(c.sql))).toBe(true);
+    expect(captured.every((c) => !/DELETE FROM ad_drafts/.test(c.sql))).toBe(true);
 
-    // S3: copy ads/.../orig.png happened, then cleanup delete on the same key.
+    // S3: copy ads/.../orig.png happened (GET source + PUT dest), then cleanup
+    // delete on the same key.
     const finalKey = 'ads/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/orig.png';
-    expect(s3Calls.some((c) => c.kind === 'CopyObjectCommand' && c.key === finalKey)).toBe(true);
+    expect(s3Calls.some((c) => c.kind === 'PutObjectCommand' && c.key === finalKey)).toBe(true);
     expect(s3Calls.some((c) => c.kind === 'DeleteObjectCommand' && c.key === finalKey)).toBe(true);
   });
 
@@ -327,10 +344,8 @@ describe('runSubmitModal', () => {
         { rows: [draftRow] },
         { rows: [formatRulesRow] },
         { rows: [] }, // BEGIN
-        { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
-        { rows: [{ max_active_ads: 5 }] },
-        { rows: [{ count: '0' }] },
-        { rows: [] }, // INSERT
+        { rows: [{ id: 'draft-1' }] }, // SELECT id FROM ad_drafts
+        { rows: [], rowCount: 1 }, // conditional INSERT -> 1 row
         { rows: [] }, // DELETE
         { rows: [] }, // COMMIT
       ],
@@ -354,20 +369,23 @@ describe('runSubmitModal', () => {
       { rows: [draftRow] },
       { rows: [formatRulesRow] },
       { rows: [] }, // BEGIN
-      { rows: [{ id: 'draft-1' }] }, // SELECT FOR UPDATE
-      { rows: [{ max_active_ads: 5 }] },
-      { rows: [{ count: '0' }] },
-      { rows: [] }, // INSERT
+      { rows: [{ id: 'draft-1' }] }, // SELECT id FROM ad_drafts
+      { rows: [], rowCount: 1 }, // conditional INSERT -> 1 row
       { rows: [] }, // DELETE
       { rows: [] }, // COMMIT
       { rows: [] }, // UPDATE review_message_id
     ]);
-    let sendCount = 0;
     const s3 = {
-      send: vi.fn(async () => {
-        sendCount++;
-        // first call (CopyObject) ok, second call (DeleteObject) throws
-        if (sendCount === 2) throw new Error('s3 down');
+      // copyObject() does GET (source, needs Body) + PUT (dest); the subsequent
+      // staging DeleteObject throws to exercise the best-effort cleanup path.
+      send: vi.fn(async (cmd: { constructor: { name: string } }) => {
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return {
+            Body: new Response(new Uint8Array([1, 2, 3])).body,
+            ContentType: 'image/png',
+          };
+        }
+        if (cmd.constructor.name === 'DeleteObjectCommand') throw new Error('s3 down');
         return {};
       }),
     } as unknown as S3Client;

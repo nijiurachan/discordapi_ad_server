@@ -7,7 +7,6 @@ import { postReviewEmbed } from '../../discord/review-embed.ts';
 import type { ModalSubmitInteractionPayload } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { buildPublicImageUrl } from '../../serve/router.ts';
-import { countActiveAds } from '../../sponsors/tier.ts';
 import { copyObject, createS3Client, deleteObject } from '../../storage/s3.ts';
 import { fetchFormatRules } from '../../validation/rules.ts';
 import { validateBody, validateLinkUrl, validateTitle } from '../../validation/text.ts';
@@ -33,6 +32,7 @@ type AdDraft = {
   imageWidth: number | null;
   imageHeight: number | null;
   expiresAt: Date;
+  weight: number | null;
 };
 
 async function fetchDraft(client: PgClient, draftId: string): Promise<AdDraft | null> {
@@ -46,9 +46,10 @@ async function fetchDraft(client: PgClient, draftId: string): Promise<AdDraft | 
     image_width: number | null;
     image_height: number | null;
     expires_at: Date;
+    weight: number | null;
   }>(
     `SELECT id, sponsor_id, slot, image_key, image_mime, image_bytes,
-            image_width, image_height, expires_at
+            image_width, image_height, weight, expires_at
        FROM ad_drafts
       WHERE id = ?`,
     [draftId],
@@ -64,6 +65,7 @@ async function fetchDraft(client: PgClient, draftId: string): Promise<AdDraft | 
     imageBytes: row.image_bytes,
     imageWidth: row.image_width,
     imageHeight: row.image_height,
+    weight: row.weight,
     expiresAt:
       row.expires_at instanceof Date
         ? row.expires_at
@@ -78,17 +80,6 @@ function findTextValue(payload: ModalSubmitInteractionPayload, customId: string)
     }
   }
   return '';
-}
-
-async function fetchTierLimit(client: PgClient, sponsorId: string): Promise<number | null> {
-  const res = await client.query<{ max_active_ads: number }>(
-    `SELECT t.max_active_ads
-       FROM sponsors s
-       JOIN tiers t ON t.id = s.current_tier_id
-      WHERE s.discord_user_id = ?`,
-    [sponsorId],
-  );
-  return res.rows[0]?.max_active_ads ?? null;
 }
 
 /**
@@ -176,30 +167,30 @@ export async function runSubmitModal(
       return ephemeral(c, '下書きが既に処理済みです。再度起稿してください。');
     }
 
-    // Recheck tier limit inside the locked transaction.
-    const tierLimit = await fetchTierLimit(deps.client, draft.sponsorId);
-    if (tierLimit !== null) {
-      const activeCount = await countActiveAds(deps.client, draft.sponsorId);
-      if (activeCount >= tierLimit) {
-        await deps.client.query('ROLLBACK');
-        txOpen = false;
-        try {
-          await deleteObject(deps.s3, deps.bucket, finalKey);
-        } catch (cleanupErr) {
-          console.error('submit-modal: over-limit cleanup failed', { finalKey, cleanupErr });
-        }
-        return ephemeral(
-          c,
-          `現在のティアでは同時に最大 ${tierLimit} 件まで配信できます。（既に ${activeCount} 件あります）`,
-        );
-      }
-    }
+    // The reservation: how much of the sponsor's tier budget this banner claims.
+    const requested = draft.weight ?? 1;
 
-    await deps.client.query(
+    const insertRes = await deps.client.query(
+      // D1/SQLite has no row locks, so we cannot read-then-write the budget
+      // safely. This single atomic statement inserts the pending row ONLY when
+      // Σ weight_alloc over the sponsor's existing pending+approved regular
+      // non-admin ads, plus `requested`, is still <= the live tier weight.
+      // `meta.changes` (rowCount) == 0 ⇒ over budget ⇒ nothing inserted.
       `INSERT INTO ads
          (id, sponsor_id, kind, slot, title, body, link_url,
-          image_key, image_mime, image_bytes, image_width, image_height, status)
-       VALUES (?, ?, 'regular', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+          image_key, image_mime, image_bytes, image_width, image_height, status, weight_alloc)
+       SELECT ?, ?, 'regular', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?
+        WHERE (
+          (SELECT COALESCE(SUM(weight_alloc), 0)
+             FROM ads
+            WHERE sponsor_id = ?
+              AND kind = 'regular'
+              AND created_by_admin IS NULL
+              AND status IN ('pending', 'approved')) + ?
+        ) <= (SELECT t.weight
+                FROM sponsors s
+                JOIN tiers t ON t.id = s.current_tier_id
+               WHERE s.discord_user_id = ?)`,
       [
         adId,
         draft.sponsorId,
@@ -212,8 +203,28 @@ export async function runSubmitModal(
         draft.imageBytes,
         draft.imageWidth,
         draft.imageHeight,
+        requested, // weight_alloc value
+        draft.sponsorId, // SUM scope
+        requested, // SUM addend
+        draft.sponsorId, // tier lookup
       ],
     );
+    if ((insertRes.rowCount ?? 0) === 0) {
+      // Over budget (or sponsor has no tier ⇒ the subquery is NULL ⇒ the
+      // comparison is false ⇒ 0 rows). Roll back the draft scaffolding and
+      // clean up the freshly-copied final image.
+      await deps.client.query('ROLLBACK');
+      txOpen = false;
+      try {
+        await deleteObject(deps.s3, deps.bucket, finalKey);
+      } catch (cleanupErr) {
+        console.error('submit-modal: over-budget cleanup failed', { finalKey, cleanupErr });
+      }
+      return ephemeral(
+        c,
+        `重み ${requested} はティアの重み予算を超えています。配分を見直して再度起稿してください。`,
+      );
+    }
 
     await deps.client.query('DELETE FROM ad_drafts WHERE id = ?', [draftId]);
 
