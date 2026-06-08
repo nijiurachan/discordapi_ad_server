@@ -17,3 +17,24 @@ export function modalResponse(c: Context, modal: ModalResponse): Response {
     data: modal,
   });
 }
+
+export function deferredEphemeral(c: Context): Response {
+  return c.json({
+    type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { flags: EPHEMERAL_FLAG },
+  });
+}
+
+export function updateMessage(
+  c: Context,
+  data: {
+    content?: string;
+    embeds?: Record<string, unknown>[];
+    components?: Record<string, unknown>[];
+  },
+): Response {
+  return c.json({
+    type: InteractionResponseType.UPDATE_MESSAGE,
+    data,
+  });
+}
