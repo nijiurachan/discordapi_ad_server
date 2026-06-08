@@ -153,3 +153,32 @@ describe('sumActiveWeight', () => {
     expect(await sumActiveWeight(client, 'sp-2')).toBe(0);
   });
 });
+
+describe('getSponsorBudget', () => {
+  it('returns tierWeight/used/remaining when the sponsor has a tier', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [{ weight: 80 }] }, // tier lookup
+        { rows: [{ used: 30 }] }, // sumActiveWeight
+      ],
+      captured,
+    );
+    const b = await getSponsorBudget(client, 'sp-1');
+    expect(b).toEqual({ tierWeight: 80, used: 30, remaining: 50 });
+    expect(captured[0]?.sql).toMatch(/FROM sponsors s/);
+    expect(captured[0]?.sql).toMatch(/JOIN tiers t/);
+    expect(captured[0]?.params).toEqual(['sp-1']);
+  });
+
+  it('clamps remaining at 0 when used exceeds the tier (post-downgrade)', async () => {
+    const client = mockClient([{ rows: [{ weight: 10 }] }, { rows: [{ used: 25 }] }]);
+    const b = await getSponsorBudget(client, 'sp-1');
+    expect(b).toEqual({ tierWeight: 10, used: 25, remaining: 0 });
+  });
+
+  it('returns null when the sponsor has no current tier', async () => {
+    const client = mockClient([{ rows: [] }]);
+    expect(await getSponsorBudget(client, 'sp-3')).toBeNull();
+  });
+});

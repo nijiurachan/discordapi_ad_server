@@ -183,3 +183,29 @@ export async function sumActiveWeight(client: PgClient, sponsorId: string): Prom
   );
   return Number(res.rows[0]?.used ?? 0);
 }
+
+export type SponsorBudget = { tierWeight: number; used: number; remaining: number };
+
+/**
+ * The sponsor's budget snapshot: T (= tiers.weight via current_tier_id),
+ * used (= sumActiveWeight), remaining = max(0, T - used). Returns null when the
+ * sponsor has no current tier (e.g. FANBOX/DLsite/tier-less sponsors), which
+ * the caller must treat as "budget gate does not apply".
+ */
+export async function getSponsorBudget(
+  client: PgClient,
+  sponsorId: string,
+): Promise<SponsorBudget | null> {
+  const tierRes = await client.query<{ weight: number }>(
+    `SELECT t.weight
+       FROM sponsors s
+       JOIN tiers t ON t.id = s.current_tier_id
+      WHERE s.discord_user_id = ?`,
+    [sponsorId],
+  );
+  const tierRow = tierRes.rows[0];
+  if (!tierRow) return null;
+  const tierWeight = Number(tierRow.weight);
+  const used = await sumActiveWeight(client, sponsorId);
+  return { tierWeight, used, remaining: Math.max(0, tierWeight - used) };
+}
