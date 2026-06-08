@@ -14,6 +14,7 @@ function buildPayload(overrides?: {
     type: 3,
     id: 'int-1',
     application_id: 'app-1',
+    token: 'tok-1',
     guild_id: 'guild-1',
     channel_id: 'review-chan',
     member: {

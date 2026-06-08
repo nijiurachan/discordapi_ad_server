@@ -181,6 +181,7 @@ export type MessageComponentInteractionPayload = {
   type: typeof InteractionType.MESSAGE_COMPONENT;
   id: string;
   application_id: string;
+  token: string;
   guild_id?: string;
   channel_id?: string;
   member?: {
