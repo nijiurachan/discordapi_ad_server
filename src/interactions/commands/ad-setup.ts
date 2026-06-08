@@ -28,18 +28,20 @@ function hasAdministrator(permissions: string | undefined): boolean {
   }
 }
 
-type MenuKind = 'submit' | 'review' | 'admin';
+type MenuKind = 'submit' | 'review' | 'admin' | 'portal';
 
 const MESSAGE_KEY: Record<MenuKind, string> = {
   submit: SystemSettingKey.SUBMIT_MENU_MESSAGE_ID,
   review: SystemSettingKey.REVIEW_MENU_MESSAGE_ID,
   admin: SystemSettingKey.ADMIN_MENU_MESSAGE_ID,
+  portal: SystemSettingKey.PORTAL_PANEL_MESSAGE_ID,
 };
 
 const CHANNEL_KEY: Record<MenuKind, string> = {
   submit: SystemSettingKey.SUBMIT_MENU_CHANNEL_ID,
   review: SystemSettingKey.REVIEW_MENU_CHANNEL_ID,
   admin: SystemSettingKey.ADMIN_MENU_CHANNEL_ID,
+  portal: SystemSettingKey.PORTAL_PANEL_CHANNEL_ID,
 };
 
 /**
@@ -106,6 +108,24 @@ function buildSubmitMenu(rules: FormatRules | null): {
   };
 }
 
+function buildPortalPanel(): { content: string; components: ActionRowComponent[] } {
+  return {
+    content: `## 📣 広告ポータル
+
+下のボタンを押すと、あなた専用の広告ポータル（プライベートチャンネル）を開きます。
+プラン / 残り利用可能ウェイト / 出稿中バナーを確認し、バナーの追加・管理ができます。
+（旧来の \`/ad submit\` も引き続き利用できます。）`,
+    components: [
+      {
+        type: 1,
+        components: [
+          { type: 2, style: 1, custom_id: 'portal:open', label: '📣 広告ポータルを開く' },
+        ],
+      },
+    ],
+  };
+}
+
 export async function runAdSetup(
   c: Context,
   payload: ApplicationCommandInteractionPayload,
@@ -119,7 +139,7 @@ export async function runAdSetup(
   const kindOpt = opts.find((o) => o.name === 'kind');
   const channelId = typeof channelOpt?.value === 'string' ? channelOpt.value : '';
   const kindRaw = typeof kindOpt?.value === 'string' ? kindOpt.value : '';
-  if (!channelId || !['submit', 'review', 'admin'].includes(kindRaw)) {
+  if (!channelId || !['submit', 'review', 'admin', 'portal'].includes(kindRaw)) {
     return ephemeral(c, 'channel と kind が必須です');
   }
   const kind = kindRaw as MenuKind;
@@ -150,7 +170,9 @@ export async function runAdSetup(
   const menu: Record<string, unknown> =
     kind === 'admin'
       ? buildAdminMenuMessage()
-      : buildSubmitMenu(await fetchFormatRules(deps.client, 'default'));
+      : kind === 'portal'
+        ? buildPortalPanel()
+        : buildSubmitMenu(await fetchFormatRules(deps.client, 'default'));
   const message = await deps.rest.createMessage(channelId, menu);
 
   // Persist new message_id + channel_id

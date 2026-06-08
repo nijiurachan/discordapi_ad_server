@@ -238,6 +238,7 @@ const commands = [
           { name: 'submit', value: 'submit' },
           { name: 'review', value: 'review' },
           { name: 'admin', value: 'admin' },
+          { name: 'portal', value: 'portal' },
         ],
       },
     ],
