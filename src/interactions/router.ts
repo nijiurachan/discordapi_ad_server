@@ -10,6 +10,8 @@ import type { Bindings } from '../env.ts';
 import { handleAdminAdsListButton } from './admin-ads-list.ts';
 import { handleAdminButton } from './buttons/admin-buttons.ts';
 import { handleAckButton } from './buttons/fallback-ack-button.ts';
+import { handlePortalDashboardButton } from './buttons/portal-dashboard-buttons.ts';
+import { handlePortalOpenButton } from './buttons/portal-open-button.ts';
 import { handleReviewApproveButton } from './buttons/review-approve-button.ts';
 import { handleReviewRejectButton } from './buttons/review-reject-button.ts';
 import { handleAdList } from './commands/ad-list.ts';
@@ -175,6 +177,12 @@ interactions.post('/', async (c) => {
       }
       if (cid.startsWith(ADMIN_EDIT_OPEN_PREFIX)) {
         return handleAdminEditOpenButton(c, mc);
+      }
+      if (cid === 'portal:open') {
+        return handlePortalOpenButton(c, mc);
+      }
+      if (cid.startsWith('portal:')) {
+        return handlePortalDashboardButton(c, mc);
       }
       return c.json({ error: 'unknown component' }, 501);
     }
