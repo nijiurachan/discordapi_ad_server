@@ -99,12 +99,27 @@ describe('runAdSetup', () => {
     const postedChannel = call[0];
     const postedBody = call[1];
     expect(postedChannel).toBe('chan-target');
-    const body = postedBody as { content: string; components: unknown[] };
-    expect(body.content).toContain('広告起稿');
-    expect(body.components).toHaveLength(1);
-    const row = body.components[0] as { type: number; components: unknown[] };
-    expect(row.type).toBe(1);
-    expect(row.components).toHaveLength(4);
+    const body = postedBody as {
+      content: string;
+      components: { type: number; components: { custom_id?: string; style?: number }[] }[];
+    };
+    // Portal-centric rework (Phase 3 §3.A): the menu now leads with the portal
+    // CTA and keeps the legacy /ad submit guidance + buttons as a secondary row.
+    expect(body.content).toContain('広告ポータル');
+    expect(body.content).toContain('推奨');
+    // Two action rows: [portal CTA] then [legacy ops].
+    expect(body.components).toHaveLength(2);
+    const portalRow = body.components[0];
+    expect(portalRow?.type).toBe(1);
+    const portalBtn = portalRow?.components[0];
+    expect(portalBtn?.custom_id).toBe('portal:open');
+    expect(portalBtn?.style).toBe(1);
+    // Legacy row still carries the four existing buttons, unchanged.
+    const legacyRow = body.components[1];
+    expect(legacyRow?.type).toBe(1);
+    expect(legacyRow?.components).toHaveLength(4);
+    const legacyIds = legacyRow?.components.map((b) => b.custom_id);
+    expect(legacyIds).toEqual(['ad:list', 'ad:stats:period', 'ad:rules', 'ad:help']);
 
     // deleteMessage was NOT called (no old menu)
     expect(deleteMessage).not.toHaveBeenCalled();
@@ -122,6 +137,48 @@ describe('runAdSetup', () => {
       JSON.stringify('chan-target'),
       'admin-1',
     ]);
+  });
+
+  it('submit menu is portal-centric: portal CTA leads, legacy buttons remain', async () => {
+    const client = mockClient([
+      { rows: [] }, // old message_id missing
+      { rows: [] }, // old channel_id missing
+      { rows: [] }, // upsert message_id
+      { rows: [] }, // upsert channel_id
+    ]);
+    const createMessage = vi.fn(async () => ({ id: 'msg-new', channel_id: 'chan-target' }));
+    const deleteMessage = vi.fn(async () => undefined);
+    const rest = { createMessage, deleteMessage } as unknown as DiscordRest;
+
+    const res = await invoke(buildPayload(), { rest, client, actorId: 'admin-1' });
+    expect(res.status).toBe(200);
+
+    const call = createMessage.mock.calls[0] as unknown as [string, unknown];
+    const body = call[1] as {
+      content: string;
+      components: { type: number; components: { custom_id?: string; style?: number }[] }[];
+    };
+
+    // Content leads with the ad portal (recommended) and still documents the
+    // legacy /ad submit flow as a secondary path.
+    expect(body.content).toContain('広告ポータル');
+    expect(body.content).toContain('推奨');
+    expect(body.content).toContain('/ad submit');
+
+    // Flatten all buttons across rows to assert presence regardless of layout.
+    const allButtons = body.components.flatMap((row) => row.components);
+    const ids = allButtons.map((b) => b.custom_id);
+
+    // The portal:open CTA is the first action and uses the primary style (1).
+    expect(body.components[0]?.components[0]?.custom_id).toBe('portal:open');
+    expect(body.components[0]?.components[0]?.style).toBe(1);
+
+    // Legacy buttons are all still present.
+    expect(ids).toContain('portal:open');
+    expect(ids).toContain('ad:list');
+    expect(ids).toContain('ad:stats:period');
+    expect(ids).toContain('ad:rules');
+    expect(ids).toContain('ad:help');
   });
 
   it('old menu exists: deletes first, then posts new, then persists', async () => {

@@ -88,13 +88,27 @@ function buildSubmitMenu(rules: FormatRules | null): {
   const rulesBlock = rules
     ? `\n\n${formatRulesSummary(rules)}`
     : '\n\n_（入稿ルール未設定 — 管理者が「📐 入稿ルール」で設定するとここに表示されます）_';
+  // Phase 3 §3.A: rework this menu to be portal-centric to drive migration.
+  // The ad portal (recommended) leads with a primary `portal:open` CTA; the
+  // legacy `/ad submit` guidance + existing buttons remain below as a clearly
+  // labeled secondary "legacy operations" row (unchanged custom_ids/handlers).
   return {
-    content: `## 📣 広告起稿システム
+    content: `## 📣 広告ポータル（推奨）
 
+下の「📣 広告ポータルを開く」を押すと、あなた専用の広告ポータルが開きます。
+プラン / 残り利用可能ウェイト / 出稿中バナーの確認、バナーの追加・管理がここで完結します。
+
+━ 従来の操作 ━
 起稿は下のチャット欄から \`/ad submit\`
 （slot を選び、image に画像を添付してください）
 添付後、タイトル / 本文 / リンクの入力画面が開きます。${rulesBlock}`,
     components: [
+      {
+        type: 1,
+        components: [
+          { type: 2, style: 1, custom_id: 'portal:open', label: '📣 広告ポータルを開く' },
+        ],
+      },
       {
         type: 1,
         components: [
