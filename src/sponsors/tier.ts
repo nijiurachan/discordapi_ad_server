@@ -112,5 +112,55 @@ export function effectiveWeights(
       paused: [],
     };
   }
-  throw new Error('not implemented');
+  // S > T. If count exceeds the budget, the min-1 floor cannot fit: pause the
+  // smallest-alloc banners first (ties broken by id, ascending — deterministic)
+  // until count <= T, then recompute proportional weights over the survivors.
+  const paused: string[] = [];
+  let survivors = allocs.slice();
+  while (survivors.length > tierWeight) {
+    const victim = survivors
+      .slice()
+      .sort((x, y) => x.weightAlloc - y.weightAlloc || (x.id < y.id ? -1 : 1))[0];
+    if (!victim) break;
+    paused.push(victim.id);
+    survivors = survivors.filter((a) => a.id !== victim.id);
+  }
+  const Ssurv = survivors.reduce((sum, a) => sum + a.weightAlloc, 0);
+  // Map id -> alloc so we can order absorption by descending alloc.
+  const allocById = new Map(survivors.map((a) => [a.id, a.weightAlloc]));
+  const weights = survivors.map((a) => ({
+    id: a.id,
+    weightSnapshot: Math.max(1, Math.round((a.weightAlloc * tierWeight) / Ssurv)),
+  }));
+  // Absorb the integer remainder (can be NEGATIVE when rounding overshot) so
+  // Σ weightSnapshot == tierWeight exactly. Apply it largest-alloc-first, but
+  // NEVER let an absorber drop below the min weight of 1: when a negative
+  // remainder would push the largest below 1, only take it down to 1 and roll
+  // the residual onto the NEXT-largest survivor, and so on. survivors satisfy
+  // count <= T (we paused until that held), so assigning each a floor of 1
+  // leaves enough headroom that the residual is always fully absorbed and the
+  // loop terminates with Σ == T and every weightSnapshot >= 1.
+  let remainder = tierWeight - weights.reduce((sum, w) => sum + w.weightSnapshot, 0);
+  if (remainder !== 0) {
+    const order = weights
+      .map((w, idx) => ({ idx, alloc: allocById.get(w.id) ?? 0, id: w.id }))
+      .sort((x, y) => y.alloc - x.alloc || (x.id < y.id ? -1 : 1));
+    for (const { idx } of order) {
+      if (remainder === 0) break;
+      const target = weights[idx];
+      if (!target) continue;
+      if (remainder > 0) {
+        // Positive remainder: pile it all on the first (largest) absorber.
+        target.weightSnapshot += remainder;
+        remainder = 0;
+      } else {
+        // Negative remainder: subtract only down to the floor of 1, roll the rest.
+        const canTake = target.weightSnapshot - 1; // >= 0
+        const take = Math.min(canTake, -remainder);
+        target.weightSnapshot -= take;
+        remainder += take;
+      }
+    }
+  }
+  return { weights, paused };
 }
