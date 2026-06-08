@@ -10,12 +10,7 @@ import type {
 } from '../../discord/types.ts';
 import type { Bindings } from '../../env.ts';
 import { blockIfUnackedFallback } from '../../sponsors/fallback-gate.ts';
-import {
-  type Tier,
-  checkMaxActiveAds,
-  countActiveAds,
-  refreshSponsorTier,
-} from '../../sponsors/tier.ts';
+import { type Tier, getSponsorBudget, refreshSponsorTier } from '../../sponsors/tier.ts';
 import { createS3Client, deleteObject, putObject } from '../../storage/s3.ts';
 import { type DetectedMime, validateImage, validateMagicBytes } from '../../validation/image.ts';
 import { type FormatRules, fetchFormatRules } from '../../validation/rules.ts';
@@ -84,6 +79,13 @@ export async function runAdSubmit(
   if (!slot || !imageId) {
     return ephemeral(c, 'コマンドの引数が不足しています');
   }
+  const weightOpt = findOption(submitCmd?.options, 'weight');
+  const requestedWeight =
+    typeof weightOpt?.value === 'number' &&
+    Number.isInteger(weightOpt.value) &&
+    weightOpt.value >= 1
+      ? weightOpt.value
+      : 1;
   const attachment: Attachment | undefined = payload.data.resolved?.attachments?.[imageId];
   if (!attachment) {
     return ephemeral(c, '添付画像が見つかりませんでした');
@@ -119,11 +121,15 @@ export async function runAdSubmit(
     return ephemeral(c, 'ティアロールが付与されていません。サポーター登録後に再試行してください');
   }
 
-  // 5. Active ad count + max check.
-  const activeCount = await countActiveAds(client, userId);
-  const maxCheck = checkMaxActiveAds(tier, activeCount);
-  if (!maxCheck.ok) {
-    return ephemeral(c, maxCheck.message);
+  // 5. Budget pre-check (best-effort; submit-modal re-checks transactionally).
+  // tier-less sponsors never reach here (refreshSponsorTier returned a tier),
+  // so getSponsorBudget should be non-null; treat null defensively as "allow".
+  const budget = await getSponsorBudget(client, userId);
+  if (budget && requestedWeight > budget.remaining) {
+    return ephemeral(
+      c,
+      `重み ${requestedWeight} は残予算 ${budget.remaining}（ティア枠 ${budget.tierWeight} / 配分済 ${budget.used}）を超えています。`,
+    );
   }
 
   // 6. Format rules.
@@ -188,13 +194,14 @@ export async function runAdSubmit(
     await client.query(
       // SQLite has no `interval` literal; epoch-ms math instead (10 min = 600,000 ms).
       `INSERT INTO ad_drafts
-         (id, sponsor_id, slot, image_key, image_mime, image_bytes,
+         (id, sponsor_id, slot, weight, image_key, image_mime, image_bytes,
           image_width, image_height, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, (unixepoch() * 1000) + 600000)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (unixepoch() * 1000) + 600000)`,
       [
         draftId,
         userId,
         slot,
+        requestedWeight,
         imageKey,
         detected,
         attachment.size,

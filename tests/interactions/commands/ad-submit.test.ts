@@ -147,15 +147,17 @@ describe('runAdSubmit', () => {
     // 1) blockIfUnackedFallback SELECT (no rows)
     // 2) refreshSponsorTier SELECT tiers
     // 3) refreshSponsorTier UPSERT sponsors
-    // 4) countActiveAds SELECT
-    // 5) fetchFormatRules SELECT
-    // 6) INSERT ad_drafts
+    // 4) getSponsorBudget tier-JOIN SELECT
+    // 5) getSponsorBudget sumActiveWeight SELECT
+    // 6) fetchFormatRules SELECT
+    // 7) INSERT ad_drafts
     const client = mockClient(
       [
         { rows: [] }, // fallback gate
         { rows: [tierRow] }, // tiers
         { rows: [] }, // upsert sponsors
-        { rows: [{ count: '0' }] }, // active count
+        { rows: [{ weight: 10 }] }, // getSponsorBudget: tier JOIN
+        { rows: [{ used: 0 }] }, // getSponsorBudget: sumActiveWeight => remaining 10
         { rows: [formatRulesRow] }, // format rules
         { rows: [] }, // insert
       ],
@@ -183,7 +185,7 @@ describe('runAdSubmit', () => {
     // Insert call params should mention the staging key with png ext
     const insertCall = captured.find((c) => /INSERT INTO ad_drafts/.test(c.sql));
     expect(insertCall).toBeDefined();
-    expect(insertCall?.params?.[3]).toBe('staging/00000000-0000-0000-0000-000000000001/orig.png');
+    expect(insertCall?.params?.[4]).toBe('staging/00000000-0000-0000-0000-000000000001/orig.png');
   });
 
   it('fallback-gate blocks: returns ephemeral with channel mention', async () => {
@@ -234,13 +236,18 @@ describe('runAdSubmit', () => {
     expect(json.data.content).toContain('ティアロール');
   });
 
-  it('over-limit: returns ephemeral with limit message', async () => {
-    const client = mockClient([
-      { rows: [] }, // fallback gate
-      { rows: [tierRow] }, // tiers
-      { rows: [] }, // upsert
-      { rows: [{ count: '5' }] }, // active count > maxActiveAds (2)
-    ]);
+  it('budget-exceeded: returns ephemeral with budget message', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [] }, // fallback gate
+        { rows: [tierRow] }, // tiers
+        { rows: [] }, // upsert
+        { rows: [{ weight: 10 }] }, // getSponsorBudget: tier JOIN
+        { rows: [{ used: 10 }] }, // getSponsorBudget: sumActiveWeight => remaining 0
+      ],
+      captured,
+    );
     const deps: AdSubmitDeps = {
       client,
       rest: mockRest(['role-bronze']),
@@ -252,7 +259,8 @@ describe('runAdSubmit', () => {
     const res = await invoke(buildPayload(), deps);
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
-    expect(json.data.content).toContain('Bronze');
+    expect(json.data.content).toContain('予算');
+    expect(captured.every((c) => !/INSERT INTO ad_drafts/.test(c.sql))).toBe(true);
   });
 
   it('missing format rules: returns ephemeral', async () => {
@@ -260,7 +268,8 @@ describe('runAdSubmit', () => {
       { rows: [] },
       { rows: [tierRow] },
       { rows: [] },
-      { rows: [{ count: '0' }] },
+      { rows: [{ weight: 10 }] }, // getSponsorBudget: tier JOIN
+      { rows: [{ used: 0 }] }, // getSponsorBudget: sumActiveWeight => remaining 10
       { rows: [] }, // no format rules
     ]);
     const deps: AdSubmitDeps = {
@@ -282,7 +291,8 @@ describe('runAdSubmit', () => {
       { rows: [] },
       { rows: [tierRow] },
       { rows: [] },
-      { rows: [{ count: '0' }] },
+      { rows: [{ weight: 10 }] }, // getSponsorBudget: tier JOIN
+      { rows: [{ used: 0 }] }, // getSponsorBudget: sumActiveWeight => remaining 10
       { rows: [formatRulesRow] },
     ]);
     const deps: AdSubmitDeps = {
@@ -307,7 +317,8 @@ describe('runAdSubmit', () => {
       { rows: [] },
       { rows: [tierRow] },
       { rows: [] },
-      { rows: [{ count: '0' }] },
+      { rows: [{ weight: 10 }] }, // getSponsorBudget: tier JOIN
+      { rows: [{ used: 0 }] }, // getSponsorBudget: sumActiveWeight => remaining 10
       { rows: [formatRulesRow] },
     ]);
     const deps: AdSubmitDeps = {
@@ -351,7 +362,8 @@ describe('runAdSubmit', () => {
       { rows: [] },
       { rows: [tierRow] },
       { rows: [] },
-      { rows: [{ count: '0' }] },
+      { rows: [{ weight: 10 }] }, // getSponsorBudget: tier JOIN
+      { rows: [{ used: 0 }] }, // getSponsorBudget: sumActiveWeight => remaining 10
       { rows: [formatRulesRow] },
     ]);
     const deps: AdSubmitDeps = {

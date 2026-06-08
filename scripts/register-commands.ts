@@ -43,6 +43,14 @@ const commands = [
             type: 11, // ATTACHMENT
             required: true,
           },
+          {
+            name: 'weight',
+            description: '重み（1-1000、規定: 1）。残り予算を超えると拒否されます',
+            type: 4, // INTEGER
+            required: false,
+            min_value: 1,
+            max_value: 1000,
+          },
         ],
       },
       {
