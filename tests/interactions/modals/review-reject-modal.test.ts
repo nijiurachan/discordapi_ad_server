@@ -108,7 +108,7 @@ function defaultDeps(client: PgClient, rest = mockRest()): RejectModalDeps {
     rest,
     client,
     reviewChannelId: 'review-chan',
-    workerBaseUrl: 'https://worker.example',
+    s3PublicBaseUrl: 'https://worker.example',
     reviewerRoleId: REVIEWER_ROLE_ID,
     guildId: 'guild-1',
     botId: 'bot-1',
@@ -151,15 +151,19 @@ describe('runRejectModal', () => {
     expect(json.type).toBe(4);
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('却下を確定');
-    expect(json.data.content).toContain('DM で起稿者に通知');
+    // Ack is generic ("通知は別途送信します") because DM + embed edit are
+    // deferred past Discord's 3s ack window; outcome isn't reflected inline.
+    expect(json.data.content).toContain('通知は別途送信します');
 
     // Optimistic UPDATE was called with `pending` filter and `rejected` target.
     const update = captured.find((c) => /UPDATE ads SET/.test(c.sql));
     expect(update).toBeDefined();
-    // params[0]=adId, params[1]=fromStatus 'pending', params[2]=newStatus 'rejected'
-    expect(update?.params?.[0]).toBe(AD_ID);
-    expect(update?.params?.[1]).toBe('pending');
-    expect(update?.params?.[2]).toBe('rejected');
+    // D1/SQLite `?` placeholders: SET params come first (status, reject_reason,
+    // reviewed_by), then the WHERE params (id, fromStatus) are appended last.
+    // params[0]=newStatus 'rejected'; params[last-1]=adId; params[last]='pending'.
+    expect(update?.params?.[0]).toBe('rejected');
+    expect(update?.params?.at(-2)).toBe(AD_ID);
+    expect(update?.params?.at(-1)).toBe('pending');
     // reject_reason set, reviewed_by set.
     expect(update?.params).toContain(VALID_REASON);
     expect(update?.params).toContain('reviewer-1');
@@ -227,7 +231,9 @@ describe('runRejectModal', () => {
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('却下を確定');
-    expect(json.data.content).toContain('プライベートチャンネルで通知');
+    // Generic ack: the private-channel fallback runs in the deferred phase,
+    // verified below via createGuildChannel + dm_delivery_status, not inline.
+    expect(json.data.content).toContain('通知は別途送信します');
 
     expect(rest.createGuildChannel).toHaveBeenCalledTimes(1);
     expect(rest.createMessage).toHaveBeenCalledTimes(1);
@@ -271,7 +277,9 @@ describe('runRejectModal', () => {
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('却下を確定');
-    expect(json.data.content).toContain('DM 送信時にエラー');
+    // Generic ack even on DM/fallback failure: the error happens in the
+    // deferred phase (console.error'd) after the ack is already returned.
+    expect(json.data.content).toContain('通知は別途送信します');
     expect(captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql))).toBeUndefined();
     const dmUpdates = captured.filter((c) => /dm_delivery_status/.test(c.sql));
     expect(dmUpdates).toHaveLength(1);

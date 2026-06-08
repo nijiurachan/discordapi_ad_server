@@ -21,14 +21,13 @@ describe('postReviewEmbed', () => {
     const result = await postReviewEmbed({
       rest,
       channelId: 'review-chan',
-      workerBaseUrl: 'https://worker.example',
       ad: {
         id: 'ad-uuid',
         slot: 'default',
         title: 'My Ad',
         body: 'Body text',
         linkUrl: 'https://example.com',
-        imageExt: 'png',
+        imageUrl: 'https://worker.example/images/ads/ad-uuid/orig.png',
       },
       sponsor: { id: 'user-123' },
     });
@@ -80,14 +79,13 @@ describe('postReviewEmbed', () => {
     await postReviewEmbed({
       rest,
       channelId: 'review-chan',
-      workerBaseUrl: 'https://worker.example',
       ad: {
         id: 'ad-1',
         slot: 'default',
         title: 'T',
         body: 'b',
         linkUrl: longLinkUrl,
-        imageExt: 'png',
+        imageUrl: 'https://worker.example/images/ads/ad-1/orig.png',
       },
       sponsor: { id: 'user-1' },
     });
@@ -116,14 +114,13 @@ describe('postReviewEmbed', () => {
     await postReviewEmbed({
       rest,
       channelId: 'review-chan',
-      workerBaseUrl: 'https://worker.example',
       ad: {
         id: 'ad-1',
         slot: 'default',
         title: 'T',
         body: longBody,
         linkUrl: 'https://example.com',
-        imageExt: 'jpg',
+        imageUrl: 'https://worker.example/images/ads/ad-1/orig.jpg',
       },
       sponsor: { id: 'user-1' },
     });
