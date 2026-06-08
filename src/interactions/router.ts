@@ -41,6 +41,10 @@ import {
   ADMIN_TIERS_MODAL_PREFIX,
   handleAdminTiersSubmitModal,
 } from './modals/admin-tiers-modal.ts';
+import {
+  WEIGHT_MODAL_PREFIX as PORTAL_WEIGHT_MODAL_PREFIX,
+  handlePortalWeightModal,
+} from './modals/portal-weight-modal.ts';
 import { handleRejectModal } from './modals/review-reject-modal.ts';
 import { handleSubmitModal } from './modals/submit-modal.ts';
 import { ephemeral } from './responses.ts';
@@ -220,6 +224,12 @@ interactions.post('/', async (c) => {
         }
         if (modalCid.startsWith('review-reject-modal:')) {
           return handleRejectModal(c, modal);
+        }
+        // portal:weight-modal:<adId> — weight-change modal submit (Task 3 §3.C-4
+        // wiring). Without this arm the submit fell through to the 501 below and
+        // the weight was never changed.
+        if (modalCid.startsWith(PORTAL_WEIGHT_MODAL_PREFIX)) {
+          return handlePortalWeightModal(c, modal);
         }
       }
       return c.json({ error: 'unknown modal' }, 501);

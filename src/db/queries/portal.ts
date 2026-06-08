@@ -175,3 +175,54 @@ export async function getSponsorActiveBanners(
     weightAlloc: r.weight_alloc,
   }));
 }
+
+/**
+ * Atomic, single-statement ownership + budget guarded weight change (Task 3
+ * §3.C-3.2). Mirrors the conditional writes in submit-modal.ts (INSERT) and
+ * review.ts:approvePendingWithinBudget (UPDATE): D1/SQLite has no row locks, so
+ * the only safe budget primitive is ONE conditional statement that flips the
+ * value only when it still fits.
+ *
+ * `weight_alloc` is set to `newWeight` ONLY when:
+ *  - the row is the clicker's own (sponsor_id = clickerId — a NON-owner therefore
+ *    yields changes=0, no separate ownership read needed),
+ *  - it is a regular, currently-budget-holding ad (kind='regular',
+ *    status IN pending/approved), and
+ *  - Σ weight_alloc over the sponsor's OTHER pending/approved regular non-admin
+ *    ads, plus `newWeight`, is still <= the live tier weight.
+ *
+ * `meta.changes` (rowCount) == 1 ⇒ applied. == 0 ⇒ budget exceeded OR not the
+ * owner OR the ad is gone/terminal — the caller surfaces an ephemeral reason and
+ * does NOT recalc/re-render. The `?`-placeholder repeated-binding style (same
+ * value re-listed in params) matches submit-modal/approve.
+ */
+export async function updateAdWeightWithinBudget(
+  client: PgClient,
+  adId: string,
+  clickerId: string,
+  newWeight: number,
+): Promise<boolean> {
+  const res = await client.query(
+    `UPDATE ads
+        SET weight_alloc = ?
+      WHERE id = ?
+        AND sponsor_id = ?
+        AND kind = 'regular'
+        AND created_by_admin IS NULL
+        AND status IN ('pending', 'approved')
+        AND (
+          (SELECT COALESCE(SUM(weight_alloc), 0)
+             FROM ads
+            WHERE sponsor_id = ?
+              AND kind = 'regular'
+              AND created_by_admin IS NULL
+              AND status IN ('pending', 'approved')
+              AND id != ?) + ?
+        ) <= (SELECT t.weight
+                FROM tiers t
+                JOIN sponsors s ON s.current_tier_id = t.id
+               WHERE s.discord_user_id = ?)`,
+    [newWeight, adId, clickerId, clickerId, adId, newWeight, clickerId],
+  );
+  return (res.rowCount ?? 0) === 1;
+}

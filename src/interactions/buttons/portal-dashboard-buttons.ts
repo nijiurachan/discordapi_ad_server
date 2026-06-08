@@ -12,6 +12,7 @@ import type { Bindings } from '../../env.ts';
 import { buildPortalDashboard } from '../../services/portal/render.ts';
 import { closePortal } from '../../services/portal/teardown.ts';
 import { getSponsorBudget, refreshSponsorTier } from '../../sponsors/tier.ts';
+import { WEIGHT_MODAL_PREFIX } from '../modals/portal-weight-modal.ts';
 import { ephemeral, modalResponse, updateMessage } from '../responses.ts';
 
 export type PortalDashboardDeps = {
@@ -30,9 +31,6 @@ const ADD_HELP =
 // carry an edit button. Overflow is noted and the sponsor is pointed at
 // `/ad withdraw` / `/ad list` for the rest.
 const MAX_WEIGHT_BUTTONS = 5;
-
-// Modal custom_id prefix the submit handler (Task 3 C-3) matches on.
-const WEIGHT_MODAL_PREFIX = 'portal:weight-modal:';
 
 export async function runPortalDashboardButton(
   c: Context,

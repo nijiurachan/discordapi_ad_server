@@ -93,4 +93,33 @@ describe('/interactions router → portal: arm (integration)', () => {
       expect([4, 9]).toContain(json.type);
     }
   });
+
+  it('routes portal:weight-modal:<adId> (MODAL_SUBMIT) to the weight handler, not the 501 fallback', async () => {
+    // The bug: before C-4 wiring this modal submit fell through to the 501
+    // "unknown modal" fallback and the weight was never changed. This asserts the
+    // submit now reaches the handler.
+    const body = JSON.stringify({
+      type: 5, // MODAL_SUBMIT
+      id: 'int-portal-4',
+      application_id: 'app-1',
+      token: 'tok-4',
+      guild_id: 'guild-1',
+      channel_id: 'chan-1',
+      member: { user: { id: 'user-1', username: 'u1' }, roles: [] },
+      data: {
+        custom_id: 'portal:weight-modal:a-1',
+        components: [{ type: 1, components: [{ type: 4, custom_id: 'weight', value: '3' }] }],
+      },
+    });
+    const res = await post(body);
+    // Reached the handler (not the 501 fallback). In the test env it may 200
+    // (ephemeral confirm/reject) or 500 (DB error escaped); both prove routing.
+    expect([200, 500]).toContain(res.status);
+    if (res.status === 200) {
+      const json = (await res.json()) as { type: number; error?: string };
+      // type 4 ephemeral — never the dispatch 501 "unknown modal".
+      expect(json.type).toBe(4);
+      expect(json.error).toBeUndefined();
+    }
+  });
 });
