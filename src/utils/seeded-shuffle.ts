@@ -77,18 +77,20 @@ export async function sha256Hex(input: string): Promise<string> {
  * primitive after a seeded random shuffle. Restores the original values on
  * rejection so the caller can keep trying alternative `j`s without bookkeeping.
  */
-function trySwap<T>(arr: T[], i: number, j: number): boolean {
+function trySwap<T>(arr: T[], i: number, j: number, keyOf: (v: T) => unknown): boolean {
   if (i === j) return false;
   const a = arr[i];
   const b = arr[j];
   if (a === undefined || b === undefined) return false;
-  if (a === b) return false; // pointless
+  if (keyOf(a) === keyOf(b)) return false; // pointless: same key
   arr[i] = b;
   arr[j] = a;
   const positions = new Set([i - 1, i, i + 1, j - 1, j, j + 1]);
   for (const p of positions) {
     if (p <= 0 || p >= arr.length) continue;
-    if (arr[p] === arr[p - 1]) {
+    const cur = arr[p];
+    const prev = arr[p - 1];
+    if (cur !== undefined && prev !== undefined && keyOf(cur) === keyOf(prev)) {
       arr[i] = a;
       arr[j] = b;
       return false;
@@ -113,7 +115,10 @@ function trySwap<T>(arr: T[], i: number, j: number): boolean {
  * Deterministic given the input, so callers can cache the result by deck
  * identity (we exploit this via the serve_rotation table).
  */
-export function spreadShuffle<T>(deck: readonly T[]): T[] {
+export function spreadShuffle<T>(
+  deck: readonly T[],
+  keyOf: (v: T) => unknown = (v) => v,
+): T[] {
   if (deck.length <= 1) return deck.slice();
   const result = deck.slice();
   // Four passes is plenty: each pass at most halves the residual duplicate
@@ -123,9 +128,11 @@ export function spreadShuffle<T>(deck: readonly T[]): T[] {
   for (let sweep = 0; sweep < MAX_SWEEPS; sweep++) {
     let swaps = 0;
     for (let i = 1; i < result.length; i++) {
-      if (result[i] !== result[i - 1]) continue;
+      const cur = result[i];
+      const prev = result[i - 1];
+      if (cur === undefined || prev === undefined || keyOf(cur) !== keyOf(prev)) continue;
       for (let j = i + 1; j < result.length; j++) {
-        if (trySwap(result, i, j)) {
+        if (trySwap(result, i, j, keyOf)) {
           swaps++;
           break;
         }
