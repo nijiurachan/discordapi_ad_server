@@ -21,7 +21,7 @@ type RawAdRow = {
   image_key: string | null;
 };
 
-type RawWeightedRow = RawAdRow & { weight_snapshot: number };
+type RawWeightedRow = RawAdRow & { weight_snapshot: number; sponsor_id: string | null };
 
 function mapRow(r: RawAdRow): ServedAd {
   return {
@@ -50,14 +50,17 @@ function utcDay(now: number = Date.now()): string {
 
 async function buildBag(ads: RawWeightedRow[], seed: string): Promise<string[]> {
   const flat: string[] = [];
+  const sponsorOf = new Map<string, string>();
   for (const a of ads) {
+    sponsorOf.set(a.id, a.sponsor_id ?? a.id);
     for (let i = 0; i < a.weight_snapshot; i++) flat.push(a.id);
   }
   // Seeded random first (preserves the weight ratio + per-day variability),
-  // then a constraint pass to push adjacent duplicates apart — so two impressions
-  // back-to-back almost never serve the same ad even when one ad dominates the
-  // weight distribution.
-  return spreadShuffle(await seededShuffle(flat, seed));
+  // then a constraint pass to push adjacent duplicates apart. Spread by sponsor
+  // identity (subsumes ad identity): two back-to-back impressions almost never
+  // share the same sponsor, let alone the same ad. Bag composition is unchanged,
+  // so per-ad share is unchanged.
+  return spreadShuffle(await seededShuffle(flat, seed), (id) => sponsorOf.get(id) ?? id);
 }
 
 /**
@@ -86,7 +89,7 @@ export async function pickRegularAds(
 ): Promise<ServedAd[]> {
   if (n <= 0) return [];
   const adsRes = await client.query<RawWeightedRow>(
-    `SELECT id, kind, title, body, link_url, image_key, weight_snapshot
+    `SELECT id, kind, title, body, link_url, image_key, weight_snapshot, sponsor_id
        FROM ads
       WHERE ${ACTIVE_FILTER}
         AND kind = 'regular'
