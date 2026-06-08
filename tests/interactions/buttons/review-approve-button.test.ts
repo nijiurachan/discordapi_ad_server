@@ -98,7 +98,7 @@ function defaultDeps(client: PgClient, rest = mockRest()): ApproveButtonDeps {
     rest,
     client,
     reviewChannelId: 'review-chan',
-    workerBaseUrl: 'https://worker.example',
+    s3PublicBaseUrl: 'https://s3.example',
     reviewerRoleId: REVIEWER_ROLE_ID,
     guildId: 'guild-1',
     botId: 'bot-1',
@@ -116,26 +116,26 @@ describe('runApproveButton', () => {
 
   it('happy path: snapshot + tier lookup + UPDATE w/ weight_snapshot + log + embed edit + DM', async () => {
     const captured: CapturedCall[] = [];
-    // Query order:
+    // Query order (tx-free atomic approve flow):
     //   1) SELECT ad snapshot (handler)
-    //   2) BEGIN ISOLATION LEVEL REPEATABLE READ (approveAd transaction)
-    //   3) SELECT ad+tier weight (service lookup, inside tx)
-    //   4) UPDATE ads (optimistic) — rowCount: 1
-    //   5) SELECT starts_at
-    //   6) INSERT review_logs
-    //   7) COMMIT
+    //   2) SELECT ad+tier weight (service lookup)
+    //   3) atomic approve UPDATE — rowCount: 1
+    //   4) getSponsorActiveRegularAllocs SELECT
+    //   5) applyEffectiveWeights UPDATE (writes weight_snapshot)
+    //   6) SELECT starts_at
+    //   7) INSERT review_logs
     //   8) UPDATE ads SET dm_delivery_status='sent' (P3.4)
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
-        { rows: [adRow] },
-        { rows: [] }, // BEGIN
-        { rows: [tierRow] }, // lookup
-        { rows: [], rowCount: 1 },
-        { rows: [{ starts_at: persistedStartsAt }] },
+        { rows: [adRow] }, // snapshot
+        { rows: [{ ...tierRow, weight_alloc: 7 }] }, // lookup
+        { rows: [], rowCount: 1 }, // atomic approve UPDATE
+        { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+        { rows: [] }, // applyEffectiveWeights UPDATE
+        { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
         { rows: [] }, // INSERT review_logs
-        { rows: [] }, // COMMIT
-        { rows: [], rowCount: 1 },
+        { rows: [], rowCount: 1 }, // dm_delivery_status='sent'
       ],
       captured,
     );
@@ -147,7 +147,7 @@ describe('runApproveButton', () => {
     expect(json.data.flags).toBe(64);
     expect(json.data.content).toContain('承認を確定');
     expect(json.data.content).toContain('weight=7');
-    expect(json.data.content).toContain('DM で起稿者に通知');
+    expect(json.data.content).toContain('通知は別途送信します');
 
     // Snapshot SELECT — non-JOIN form on ads, includes review_message_id column.
     const snapshotQ = captured.find(
@@ -162,16 +162,19 @@ describe('runApproveButton', () => {
     expect(lookupQ).toBeDefined();
     expect(lookupQ?.sql).toMatch(/JOIN tiers t/);
 
-    // Optimistic UPDATE — pending guard, approved target, weight_snapshot set.
-    const update = captured.find((c) => /UPDATE ads SET/.test(c.sql));
+    // Atomic approve UPDATE — pending guard, approved target, epoch-ms starts_at.
+    const update = captured.find((c) => /SET status = 'approved'/.test(c.sql));
     expect(update).toBeDefined();
-    expect(update?.sql).toMatch(/starts_at = now\(\)/);
-    expect(update?.sql).toMatch(/weight_snapshot = \$/);
-    expect(update?.params?.[0]).toBe(AD_ID);
-    expect(update?.params?.[1]).toBe('pending');
-    expect(update?.params?.[2]).toBe('approved');
+    expect(update?.sql).toMatch(/starts_at = \(unixepoch/);
+    expect(update?.sql).not.toMatch(/now\(\)/);
+    expect(update?.sql).toMatch(/status = 'pending'/);
+    expect(update?.params).toContain(AD_ID);
     expect(update?.params).toContain('reviewer-1');
-    expect(update?.params).toContain(7);
+
+    // weight_snapshot is written by the separate applyEffectiveWeights UPDATE.
+    const weightWrite = captured.find((c) => /UPDATE ads SET weight_snapshot = \?/.test(c.sql));
+    expect(weightWrite).toBeDefined();
+    expect(weightWrite?.params).toEqual([7, AD_ID]);
 
     // review_logs INSERT with action='approved' and reason=null.
     const logInsert = captured.find((c) => /INSERT INTO review_logs/.test(c.sql));
@@ -203,14 +206,14 @@ describe('runApproveButton', () => {
 
   it('blocked DM (403 from createDmChannel): triggers fallback, ephemeral notes private channel post', async () => {
     const captured: CapturedCall[] = [];
-    // Query order:
+    // Query order (tx-free atomic approve flow):
     //   1) SELECT ad snapshot
-    //   2) BEGIN ISOLATION LEVEL REPEATABLE READ
-    //   3) SELECT tier (lookup, inside tx)
-    //   4) UPDATE ads (approve)
-    //   5) SELECT starts_at
-    //   6) INSERT review_logs
-    //   7) COMMIT
+    //   2) SELECT tier (lookup)
+    //   3) atomic approve UPDATE
+    //   4) getSponsorActiveRegularAllocs SELECT
+    //   5) applyEffectiveWeights UPDATE
+    //   6) SELECT starts_at
+    //   7) INSERT review_logs
     //   8) UPDATE ads SET dm_delivery_status='failed' (DM blocked)
     //   9) SELECT findActiveFallback — empty
     //  10) INSERT dm_fallback_channels
@@ -218,17 +221,17 @@ describe('runApproveButton', () => {
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
-        { rows: [adRow] },
-        { rows: [] }, // BEGIN
-        { rows: [tierRow] }, // lookup
-        { rows: [], rowCount: 1 },
-        { rows: [{ starts_at: persistedStartsAt }] },
+        { rows: [adRow] }, // snapshot
+        { rows: [{ ...tierRow, weight_alloc: 7 }] }, // lookup
+        { rows: [], rowCount: 1 }, // atomic approve UPDATE
+        { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+        { rows: [] }, // applyEffectiveWeights UPDATE
+        { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
         { rows: [] }, // INSERT review_logs
-        { rows: [] }, // COMMIT
-        { rows: [], rowCount: 1 },
-        { rows: [] },
-        { rows: [], rowCount: 1 },
-        { rows: [], rowCount: 1 },
+        { rows: [], rowCount: 1 }, // dm_delivery_status='failed'
+        { rows: [] }, // findActiveFallback — empty
+        { rows: [], rowCount: 1 }, // INSERT dm_fallback_channels
+        { rows: [], rowCount: 1 }, // dm_delivery_status='fallback_posted'
       ],
       captured,
     );
@@ -241,7 +244,10 @@ describe('runApproveButton', () => {
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('承認を確定');
-    expect(json.data.content).toContain('プライベートチャンネルで通知');
+    // The ack message is generic ("通知は別途送信します") because DM + fallback
+    // work is deferred past the interaction ack; the fallback side effects below
+    // verify the blocked-DM path still ran.
+    expect(json.data.content).toContain('通知は別途送信します');
 
     // DM was attempted but createMessage on the DM channel never happened — instead
     // createGuildChannel + createMessage on the new private channel did.
@@ -265,20 +271,21 @@ describe('runApproveButton', () => {
   it('blocked DM + createGuildChannel fails: ephemeral notes failure', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const captured: CapturedCall[] = [];
-    // Query order: snapshot, BEGIN, lookup tier, UPDATE, SELECT starts_at,
-    // INSERT log, COMMIT, dm UPDATE (failed), SELECT findActiveFallback (empty)
+    // Query order (tx-free atomic approve flow): snapshot, lookup tier, atomic
+    // approve UPDATE, getSponsorActiveRegularAllocs, applyEffectiveWeights UPDATE,
+    // SELECT starts_at, INSERT log, dm UPDATE (failed), SELECT findActiveFallback (empty)
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient(
       [
-        { rows: [adRow] },
-        { rows: [] }, // BEGIN
-        { rows: [tierRow] }, // lookup
-        { rows: [], rowCount: 1 },
-        { rows: [{ starts_at: persistedStartsAt }] },
+        { rows: [adRow] }, // snapshot
+        { rows: [{ ...tierRow, weight_alloc: 7 }] }, // lookup
+        { rows: [], rowCount: 1 }, // atomic approve UPDATE
+        { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+        { rows: [] }, // applyEffectiveWeights UPDATE
+        { rows: [{ starts_at: persistedStartsAt }] }, // SELECT starts_at
         { rows: [] }, // INSERT review_logs
-        { rows: [] }, // COMMIT
-        { rows: [], rowCount: 1 },
-        { rows: [] },
+        { rows: [], rowCount: 1 }, // dm_delivery_status='failed'
+        { rows: [] }, // findActiveFallback — empty
       ],
       captured,
     );
@@ -294,8 +301,9 @@ describe('runApproveButton', () => {
     const json = (await res.json()) as { type: number; data: { content: string } };
     expect(json.type).toBe(4);
     expect(json.data.content).toContain('承認を確定');
-    // Failure path uses the 'rest_error' branch wording.
-    expect(json.data.content).toContain('DM 送信時にエラー');
+    // The ack message is generic ("通知は別途送信します") because DM + fallback
+    // work is deferred; the failed-fallback side effects below verify the path ran.
+    expect(json.data.content).toContain('通知は別途送信します');
     // No fallback INSERT, only the original dm 'failed' UPDATE.
     expect(captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql))).toBeUndefined();
     const dmUpdates = captured.filter((c) => /dm_delivery_status/.test(c.sql));
