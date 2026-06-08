@@ -188,8 +188,14 @@ export async function getSponsorActiveBanners(
  *    yields changes=0, no separate ownership read needed),
  *  - it is a regular, currently-budget-holding ad (kind='regular',
  *    status IN pending/approved), and
+ *  - the change does NOT increase this ad's own allocation (newWeight <= the
+ *    row's CURRENT weight_alloc — a decrease/no-op is always safe), OR
  *  - Σ weight_alloc over the sponsor's OTHER pending/approved regular non-admin
  *    ads, plus `newWeight`, is still <= the live tier weight.
+ *
+ * The decrease/no-op short-circuit unblocks an OVER-BUDGET sponsor (e.g. from a
+ * past data state where OTHER alloc alone exceeds the tier): without it the
+ * budget sum-check would reject EVERY change — even a reduction — trapping them.
  *
  * `meta.changes` (rowCount) == 1 ⇒ applied. == 0 ⇒ budget exceeded OR not the
  * owner OR the ad is gone/terminal — the caller surfaces an ephemeral reason and
@@ -211,18 +217,21 @@ export async function updateAdWeightWithinBudget(
         AND created_by_admin IS NULL
         AND status IN ('pending', 'approved')
         AND (
-          (SELECT COALESCE(SUM(weight_alloc), 0)
-             FROM ads
-            WHERE sponsor_id = ?
-              AND kind = 'regular'
-              AND created_by_admin IS NULL
-              AND status IN ('pending', 'approved')
-              AND id != ?) + ?
-        ) <= (SELECT t.weight
-                FROM tiers t
-                JOIN sponsors s ON s.current_tier_id = t.id
-               WHERE s.discord_user_id = ?)`,
-    [newWeight, adId, clickerId, clickerId, adId, newWeight, clickerId],
+          ? <= COALESCE(weight_alloc, 0)
+          OR (
+            (SELECT COALESCE(SUM(weight_alloc), 0)
+               FROM ads
+              WHERE sponsor_id = ?
+                AND kind = 'regular'
+                AND created_by_admin IS NULL
+                AND status IN ('pending', 'approved')
+                AND id != ?) + ?
+          ) <= (SELECT t.weight
+                  FROM tiers t
+                  JOIN sponsors s ON s.current_tier_id = t.id
+                 WHERE s.discord_user_id = ?)
+        )`,
+    [newWeight, adId, clickerId, newWeight, clickerId, adId, newWeight, clickerId],
   );
   return (res.rowCount ?? 0) === 1;
 }

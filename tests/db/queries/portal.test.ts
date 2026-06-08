@@ -9,6 +9,7 @@ import {
   getSponsorActiveBanners,
   setPortalDashboardMessageId,
   touchPortalActivity,
+  updateAdWeightWithinBudget,
 } from '../../../src/db/queries/portal.ts';
 
 type Capture = { sql: string; params: unknown[] | undefined };
@@ -18,6 +19,19 @@ function mockClient(rows: unknown[], captured: Capture[] = []): PgClient {
     query: vi.fn(async (sql: string, params?: unknown[]) => {
       captured.push({ sql, params });
       return { rows, rowCount: rows.length };
+    }) as unknown as PgClient['query'],
+    end: vi.fn(async () => undefined),
+  };
+}
+
+// A mock that returns an explicit rowCount independent of rows. The atomic
+// weight UPDATE returns no rows, so its applied/rejected outcome is conveyed
+// purely via rowCount (1 = applied, 0 = guard failed / not owner / gone).
+function mockClientRowCount(rowCount: number, captured: Capture[] = []): PgClient {
+  return {
+    query: vi.fn(async (sql: string, params?: unknown[]) => {
+      captured.push({ sql, params });
+      return { rows: [], rowCount };
     }) as unknown as PgClient['query'],
     end: vi.fn(async () => undefined),
   };
@@ -165,5 +179,68 @@ describe('getSponsorActiveBanners', () => {
     expect(captured[0]?.sql).toMatch(
       /ORDER BY[\s\S]*CASE status WHEN 'approved' THEN 1 WHEN 'pending' THEN 2/,
     );
+  });
+});
+
+describe('updateAdWeightWithinBudget', () => {
+  const AD_ID = 'ad-1';
+  const CLICKER = 'clicker-1';
+
+  it('an OVER-BUDGET sponsor reducing a banner weight SUCCEEDS (changes=1)', async () => {
+    // Even when the sponsor is over budget (OTHER alloc alone exceeds tier),
+    // a decrease must still apply: the guard short-circuits because the new
+    // weight is <= the row's current weight_alloc.
+    const captured: Capture[] = [];
+    const ok = await updateAdWeightWithinBudget(mockClientRowCount(1, captured), AD_ID, CLICKER, 2);
+    expect(ok).toBe(true);
+    const sql = captured[0]?.sql ?? '';
+    // The guard must include a "decrease is always safe" clause comparing the
+    // new weight to the row's CURRENT weight_alloc.
+    expect(sql).toMatch(/<= COALESCE\(weight_alloc, 0\)/);
+    // Ownership + kind + admin + status guards are all still present.
+    expect(sql).toMatch(/sponsor_id = \?/);
+    expect(sql).toMatch(/kind = 'regular'/);
+    expect(sql).toMatch(/created_by_admin IS NULL/);
+    expect(sql).toMatch(/status IN \('pending', 'approved'\)/);
+  });
+
+  it('an increase that exceeds budget is still REJECTED (changes=0)', async () => {
+    const captured: Capture[] = [];
+    const ok = await updateAdWeightWithinBudget(
+      mockClientRowCount(0, captured),
+      AD_ID,
+      CLICKER,
+      99,
+    );
+    expect(ok).toBe(false);
+    const sql = captured[0]?.sql ?? '';
+    // The budget sum-check clause is still present for increases.
+    expect(sql).toMatch(/SELECT COALESCE\(SUM\(weight_alloc\), 0\)/);
+    expect(sql).toMatch(/<= \(SELECT t\.weight/);
+  });
+
+  it('a non-owner is still REJECTED (changes=0)', async () => {
+    const ok = await updateAdWeightWithinBudget(mockClientRowCount(0), AD_ID, 'someone-else', 1);
+    expect(ok).toBe(false);
+  });
+
+  it('an in-budget increase still SUCCEEDS (changes=1)', async () => {
+    const ok = await updateAdWeightWithinBudget(mockClientRowCount(1), AD_ID, CLICKER, 5);
+    expect(ok).toBe(true);
+  });
+
+  it('binds params in the correct repeated-? order including the decrease compare', async () => {
+    const captured: Capture[] = [];
+    await updateAdWeightWithinBudget(mockClientRowCount(1, captured), AD_ID, CLICKER, 4);
+    // Placeholder order across the statement:
+    //   SET weight_alloc = ?               -> newWeight
+    //   WHERE id = ?                        -> adId
+    //   AND sponsor_id = ?                  -> clickerId
+    //   AND ( ? <= COALESCE(weight_alloc,0) -> newWeight (decrease compare)
+    //     OR ( (subquery sponsor_id = ?     -> clickerId
+    //            ... id != ?) + ?           -> adId, newWeight
+    //        ) <= (SELECT t.weight ... s.discord_user_id = ?) -> clickerId
+    //   )
+    expect(captured[0]?.params).toEqual([4, AD_ID, CLICKER, 4, CLICKER, AD_ID, 4, CLICKER]);
   });
 });
