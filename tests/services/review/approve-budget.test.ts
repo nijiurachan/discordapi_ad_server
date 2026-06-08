@@ -26,7 +26,14 @@ describe('getSponsorActiveRegularAllocs', () => {
   it('returns {id, weightAlloc} for pending+approved regular non-admin ads', async () => {
     const captured: CapturedCall[] = [];
     const client = mockClient(
-      [{ rows: [{ id: 'a', weight_alloc: 50 }, { id: 'b', weight_alloc: 20 }] }],
+      [
+        {
+          rows: [
+            { id: 'a', weight_alloc: 50 },
+            { id: 'b', weight_alloc: 20 },
+          ],
+        },
+      ],
       captured,
     );
     const rows = await getSponsorActiveRegularAllocs(client, 'sp-1');

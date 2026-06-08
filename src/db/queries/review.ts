@@ -116,10 +116,7 @@ export async function applyEffectiveWeights(
   paused: string[],
 ): Promise<void> {
   for (const w of weights) {
-    await client.query('UPDATE ads SET weight_snapshot = ? WHERE id = ?', [
-      w.weightSnapshot,
-      w.id,
-    ]);
+    await client.query('UPDATE ads SET weight_snapshot = ? WHERE id = ?', [w.weightSnapshot, w.id]);
   }
   for (const id of paused) {
     await client.query(
@@ -182,9 +179,8 @@ export async function approvePendingWithinBudget(
     [reviewerId, adId, sponsorId, adId, thisAlloc, sponsorId],
   );
   if ((res.rowCount ?? 0) === 1) return 'approved';
-  const probe = await client.query<{ status: string }>(
-    'SELECT status FROM ads WHERE id = ?',
-    [adId],
-  );
+  const probe = await client.query<{ status: string }>('SELECT status FROM ads WHERE id = ?', [
+    adId,
+  ]);
   return probe.rows[0]?.status === 'pending' ? 'budget_exceeded' : 'race';
 }
