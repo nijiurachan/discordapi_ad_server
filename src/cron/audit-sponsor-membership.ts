@@ -18,10 +18,7 @@ const DISCORD_ERR_UNKNOWN_MEMBER = 10007;
 
 type TierRow = { id: number; discord_role_id: string; weight: number; rank: number };
 
-type ProbedMember =
-  | { kind: 'left' }
-  | { kind: 'present'; roles: string[] }
-  | { kind: 'error' };
+type ProbedMember = { kind: 'left' } | { kind: 'present'; roles: string[] } | { kind: 'error' };
 
 async function probeMember(
   rest: DiscordRest,

@@ -1,5 +1,5 @@
 import type { PgClient } from '../db/client.ts';
-import { sha256Hex, seededShuffle, spreadShuffle } from '../utils/seeded-shuffle.ts';
+import { seededShuffle, sha256Hex, spreadShuffle } from '../utils/seeded-shuffle.ts';
 
 export type AdKind = 'regular' | 'house' | 'placeholder';
 
@@ -109,9 +109,7 @@ export async function pickRegularAds(
   }
 
   const day = utcDay();
-  const signature = await sha256Hex(
-    ads.map((a) => `${a.id}:${a.weight_snapshot}`).join('|'),
-  );
+  const signature = await sha256Hex(ads.map((a) => `${a.id}:${a.weight_snapshot}`).join('|'));
   const seed = `${slot}-${day}-${signature.slice(0, 16)}`;
   const newBag = await buildBag(ads, seed);
   if (newBag.length === 0) return [];
@@ -146,7 +144,7 @@ export async function pickRegularAds(
   const seen = new Set<string>();
   const ordered: ServedAd[] = [];
   for (let i = 0; i < n; i++) {
-    const pos = ((cursor - n + i) % bag.length + bag.length) % bag.length;
+    const pos = (((cursor - n + i) % bag.length) + bag.length) % bag.length;
     const id = bag[pos];
     if (!id || seen.has(id)) continue;
     const raw = adsById.get(id);
