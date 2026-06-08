@@ -78,3 +78,28 @@ export async function setAdReviewMessageId(
 ): Promise<void> {
   await client.query('UPDATE ads SET review_message_id = ? WHERE id = ?', [messageId, adId]);
 }
+
+export type ActiveAlloc = { id: string; weightAlloc: number };
+
+/**
+ * The sponsor's regular, non-admin ads currently holding budget (pending or
+ * approved), with their intended weight_alloc. NULL alloc (legacy rows or the
+ * implicit default) is coerced to 1. Ordered by id for deterministic
+ * effectiveWeights output. Read inside the caller's transaction.
+ */
+export async function getSponsorActiveRegularAllocs(
+  client: PgClient,
+  sponsorId: string,
+): Promise<ActiveAlloc[]> {
+  const res = await client.query<{ id: string; weight_alloc: number | null }>(
+    `SELECT id, weight_alloc
+       FROM ads
+      WHERE sponsor_id = ?
+        AND kind = 'regular'
+        AND created_by_admin IS NULL
+        AND status IN ('pending', 'approved')
+      ORDER BY id`,
+    [sponsorId],
+  );
+  return res.rows.map((r) => ({ id: r.id, weightAlloc: r.weight_alloc ?? 1 }));
+}
