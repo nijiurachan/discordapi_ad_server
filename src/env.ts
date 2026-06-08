@@ -12,6 +12,7 @@ export type Bindings = {
   REVIEW_CHANNEL_ID: string;
   ADMIN_CHANNEL_ID: string;
   FALLBACK_CHANNEL_CATEGORY_ID: string;
+  PORTAL_CHANNEL_CATEGORY_ID: string;
   REVIEWER_ROLE_ID: string;
   ADMIN_ROLE_ID: string;
   S3_ENDPOINT: string;

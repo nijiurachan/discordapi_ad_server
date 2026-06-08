@@ -18,6 +18,7 @@ export default defineWorkersConfig({
             REVIEW_CHANNEL_ID: '2',
             ADMIN_CHANNEL_ID: '3',
             FALLBACK_CHANNEL_CATEGORY_ID: '4',
+            PORTAL_CHANNEL_CATEGORY_ID: '7',
             REVIEWER_ROLE_ID: '5',
             ADMIN_ROLE_ID: '6',
             S3_ENDPOINT: 'http://localhost:9000',

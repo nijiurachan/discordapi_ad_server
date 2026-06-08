@@ -41,6 +41,7 @@ function buildEnv(): Bindings {
     REVIEW_CHANNEL_ID: 'review-chan',
     ADMIN_CHANNEL_ID: 'admin',
     FALLBACK_CHANNEL_CATEGORY_ID: 'cat',
+    PORTAL_CHANNEL_CATEGORY_ID: 'portal-cat',
     REVIEWER_ROLE_ID,
     ADMIN_ROLE_ID: 'admin-role',
     S3_ENDPOINT: 'https://s3',

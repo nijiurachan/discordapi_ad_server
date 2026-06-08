@@ -7,6 +7,8 @@ export const SystemSettingKey = {
   REVIEW_MENU_CHANNEL_ID: 'menu.review.channel_id',
   ADMIN_MENU_MESSAGE_ID: 'menu.admin.message_id',
   ADMIN_MENU_CHANNEL_ID: 'menu.admin.channel_id',
+  PORTAL_PANEL_MESSAGE_ID: 'menu.portal.message_id',
+  PORTAL_PANEL_CHANNEL_ID: 'menu.portal.channel_id',
   IP_HASH_SALT: 'ip_hash_salt',
 } as const;
 

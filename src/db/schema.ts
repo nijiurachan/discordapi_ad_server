@@ -9,6 +9,7 @@ import {
   sqliteView,
   text,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
 // D1/SQLite conventions used throughout:
@@ -243,6 +244,29 @@ export const dmFallbackChannels = sqliteTable(
     pendingIdx: index('dm_fallback_pending_idx')
       .on(t.expiresAt)
       .where(sql`${t.acknowledgedAt} IS NULL`),
+  }),
+);
+
+export const portalChannels = sqliteTable(
+  'portal_channels',
+  {
+    id: text('id').primaryKey(),
+    sponsorId: text('sponsor_id')
+      .notNull()
+      .references(() => sponsors.discordUserId, { onDelete: 'cascade' }),
+    channelId: text('channel_id').notNull().unique(),
+    dashboardMessageId: text('dashboard_message_id'),
+    createdAt: integer('created_at').notNull().default(NOW_MS),
+    lastActiveAt: integer('last_active_at').notNull().default(NOW_MS),
+    archivedAt: integer('archived_at'),
+  },
+  (t) => ({
+    // One active portal per sponsor; the partial unique index makes the
+    // INSERT-first double-click race fail loudly instead of double-creating.
+    activeSponsorIdx: uniqueIndex('portal_active_sponsor_idx')
+      .on(t.sponsorId)
+      .where(sql`${t.archivedAt} IS NULL`),
+    idleIdx: index('portal_idle_idx').on(t.lastActiveAt).where(sql`${t.archivedAt} IS NULL`),
   }),
 );
 
