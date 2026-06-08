@@ -116,3 +116,40 @@ describe('effectiveWeights', () => {
     expect(snapById(r, 'd')).toBe(1);
   });
 });
+
+import { vi } from 'vitest';
+import type { PgClient } from '../../src/db/client.ts';
+import { getSponsorBudget, sumActiveWeight } from '../../src/sponsors/tier.ts';
+
+type CapturedCall = { sql: string; params: unknown[] | undefined };
+function mockClient(
+  responses: Array<{ rows: unknown[] }>,
+  captured: CapturedCall[] = [],
+): PgClient {
+  let i = 0;
+  return {
+    query: vi.fn(async (sql: string, params?: unknown[]) => {
+      captured.push({ sql, params });
+      return responses[i++] ?? { rows: [] };
+    }) as unknown as PgClient['query'],
+    end: vi.fn(async () => undefined),
+  };
+}
+
+describe('sumActiveWeight', () => {
+  it('returns SUM(weight_alloc) over pending+approved regular ads', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient([{ rows: [{ used: 70 }] }], captured);
+    const used = await sumActiveWeight(client, 'sp-1');
+    expect(used).toBe(70);
+    expect(captured[0]?.params).toEqual(['sp-1']);
+    expect(captured[0]?.sql).toMatch(/SUM\(weight_alloc\)/);
+    expect(captured[0]?.sql).toMatch(/kind = 'regular'/);
+    expect(captured[0]?.sql).toMatch(/status IN \('pending', 'approved'\)/);
+  });
+
+  it('returns 0 when there are no active ads', async () => {
+    const client = mockClient([{ rows: [{ used: null }] }]);
+    expect(await sumActiveWeight(client, 'sp-2')).toBe(0);
+  });
+});

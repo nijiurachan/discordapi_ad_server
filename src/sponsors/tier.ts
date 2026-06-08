@@ -164,3 +164,22 @@ export function effectiveWeights(
   }
   return { weights, paused };
 }
+
+/**
+ * Σ weight_alloc over the sponsor's regular ads currently holding budget
+ * (status pending or approved). admin-contributed ads (created_by_admin set)
+ * are excluded — they are intentionally out of the budget. Returns 0 when the
+ * sponsor has no active regular ads.
+ */
+export async function sumActiveWeight(client: PgClient, sponsorId: string): Promise<number> {
+  const res = await client.query<{ used: number | null }>(
+    `SELECT COALESCE(SUM(weight_alloc), 0) AS used
+       FROM ads
+      WHERE sponsor_id = ?
+        AND kind = 'regular'
+        AND created_by_admin IS NULL
+        AND status IN ('pending', 'approved')`,
+    [sponsorId],
+  );
+  return Number(res.rows[0]?.used ?? 0);
+}
