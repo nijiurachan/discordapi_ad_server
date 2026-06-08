@@ -46,3 +46,32 @@ describe('getSponsorActiveRegularAllocs', () => {
     expect(rows).toEqual([{ id: 'a', weightAlloc: 1 }]);
   });
 });
+
+describe('applyEffectiveWeights', () => {
+  it('UPDATEs weight_snapshot per id and pauses the listed ids', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient([{ rows: [] }, { rows: [] }, { rows: [] }], captured);
+    await applyEffectiveWeights(
+      client,
+      [
+        { id: 'a', weightSnapshot: 25 },
+        { id: 'b', weightSnapshot: 10 },
+      ],
+      ['c'],
+    );
+    // two weight UPDATEs + one pause UPDATE
+    const weightUpdates = captured.filter((c) => /SET weight_snapshot = \?/.test(c.sql));
+    expect(weightUpdates).toHaveLength(2);
+    expect(weightUpdates[0]?.params).toEqual([25, 'a']);
+    expect(weightUpdates[1]?.params).toEqual([10, 'b']);
+    const pause = captured.find((c) => /SET status = 'paused'/.test(c.sql));
+    expect(pause?.params).toEqual(['c']);
+  });
+
+  it('skips the pause UPDATE when nothing is paused', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient([{ rows: [] }], captured);
+    await applyEffectiveWeights(client, [{ id: 'a', weightSnapshot: 5 }], []);
+    expect(captured.some((c) => /SET status = 'paused'/.test(c.sql))).toBe(false);
+  });
+});

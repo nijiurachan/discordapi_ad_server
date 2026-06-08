@@ -103,3 +103,30 @@ export async function getSponsorActiveRegularAllocs(
   );
   return res.rows.map((r) => ({ id: r.id, weightAlloc: r.weight_alloc ?? 1 }));
 }
+
+/**
+ * Persist effectiveWeights() output: set weight_snapshot per surviving id and
+ * move paused ids to status='paused' (one UPDATE per id keeps `?`-placeholder
+ * binding simple and avoids a dynamic IN list). Caller runs this inside its
+ * transaction.
+ */
+export async function applyEffectiveWeights(
+  client: PgClient,
+  weights: Array<{ id: string; weightSnapshot: number }>,
+  paused: string[],
+): Promise<void> {
+  for (const w of weights) {
+    await client.query('UPDATE ads SET weight_snapshot = ? WHERE id = ?', [
+      w.weightSnapshot,
+      w.id,
+    ]);
+  }
+  for (const id of paused) {
+    await client.query(
+      `UPDATE ads
+          SET status = 'paused'
+        WHERE id = ?`,
+      [id],
+    );
+  }
+}
