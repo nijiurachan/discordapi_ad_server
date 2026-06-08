@@ -9,7 +9,7 @@ import { approveAd } from '../../services/review/approve.ts';
 import { sendResultDM } from '../../services/review/dm.ts';
 import { createOrReuseFallbackChannel } from '../../services/review/fallback.ts';
 import { isReviewer } from '../../sponsors/reviewer-auth.ts';
-import { ephemeral } from '../responses.ts';
+import { ephemeral, updateMessage } from '../responses.ts';
 
 type AdSnapshot = {
   id: string;
@@ -115,38 +115,35 @@ export async function runApproveButton(
     return ephemeral(c, message);
   }
 
-  // Embed edit + DM + fallback channel involve REST hops that can blow past
-  // Discord's 3-second interaction window (we logged 5s+ wallTimes on the DM
-  // path). Run them after returning the ack so the user sees a prompt
-  // "✅ 承認確定" instead of "問題が発生しました". In tests, waitUntil is
-  // absent and the work is awaited inline so assertions still see the side
-  // effects.
-  const deferred = async () => {
-    if (ad.reviewMessageId && ad.sponsorId) {
-      try {
-        const imageUrl = buildPublicImageUrl(deps.s3PublicBaseUrl, ad.imageKey);
-        const outcomeEmbed = buildReviewOutcomeEmbed(
-          {
-            id: ad.id,
-            slot: ad.slot,
-            title: ad.title,
-            body: ad.body,
-            linkUrl: ad.linkUrl,
-            ...(imageUrl ? { imageUrl } : {}),
-          },
-          { id: ad.sponsorId },
-          'approved',
-          reviewerId,
-        );
-        await deps.rest.editMessage(deps.reviewChannelId, ad.reviewMessageId, {
-          embeds: [outcomeEmbed],
-          components: [],
-        });
-      } catch (err) {
-        console.error('review-approve: embed edit failed (continuing)', err);
-      }
-    }
+  // Clear the 承認/却下 buttons reliably via the interaction RESPONSE
+  // (UPDATE_MESSAGE / type 7). This edits the SOURCE review message
+  // synchronously and atomically with the ack, so the buttons can't linger
+  // after a successful approve (the old deferred editMessage could silently
+  // fail / not run). The outcome embed is built here from the already-fetched
+  // `ad` snapshot; on result.ok the sponsor is guaranteed non-null
+  // (approveAd returns no_sponsor otherwise).
+  const imageUrl = buildPublicImageUrl(deps.s3PublicBaseUrl, ad.imageKey);
+  const outcomeEmbed = buildReviewOutcomeEmbed(
+    {
+      id: ad.id,
+      slot: ad.slot,
+      title: ad.title,
+      body: ad.body,
+      linkUrl: ad.linkUrl,
+      ...(imageUrl ? { imageUrl } : {}),
+    },
+    { id: ad.sponsorId ?? '' },
+    'approved',
+    reviewerId,
+  );
 
+  // DM + fallback channel involve REST hops that can blow past Discord's
+  // 3-second interaction window (we logged 5s+ wallTimes on the DM path). Run
+  // them after returning the response. In tests, waitUntil is absent and the
+  // work is awaited inline so assertions still see the side effects. The
+  // source-message edit is NOT done here anymore — the type-7 response above
+  // owns it.
+  const deferred = async () => {
     if (!ad.sponsorId) return;
     try {
       const dmResult = await sendResultDM({
@@ -192,10 +189,7 @@ export async function runApproveButton(
     await deferred();
   }
 
-  return ephemeral(
-    c,
-    `✅ 承認を確定しました。weight=${result.weightSnapshot} を凍結。通知は別途送信します。`,
-  );
+  return updateMessage(c, { embeds: [outcomeEmbed], components: [] });
 }
 
 /**

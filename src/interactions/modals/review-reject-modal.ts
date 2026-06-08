@@ -9,7 +9,7 @@ import { buildPublicImageUrl } from '../../serve/router.ts';
 import { sendResultDM } from '../../services/review/dm.ts';
 import { createOrReuseFallbackChannel } from '../../services/review/fallback.ts';
 import { isReviewer } from '../../sponsors/reviewer-auth.ts';
-import { ephemeral } from '../responses.ts';
+import { ephemeral, updateMessage } from '../responses.ts';
 
 const CUSTOM_ID_PREFIX = 'review-reject-modal:';
 
@@ -144,37 +144,34 @@ export async function runRejectModal(
     throw err;
   }
 
-  // Embed edit + DM + fallback channel can blow past Discord's 3s window
-  // (we logged 5s+ wallTimes). Defer them so the modal closes immediately.
-  // Tests omit waitUntil and the work is awaited inline.
+  // Clear the 承認/却下 buttons reliably via the interaction RESPONSE
+  // (UPDATE_MESSAGE / type 7). This edits the SOURCE review message
+  // synchronously and atomically with the ack, so the buttons can't linger
+  // after a successful reject (the old deferred editMessage could silently
+  // fail / not run). The outcome embed is built here from the already-fetched
+  // `ad` snapshot.
   const reviewedAt = new Date();
-  const deferred = async () => {
-    if (ad.reviewMessageId && ad.sponsorId) {
-      try {
-        const imageUrl = buildPublicImageUrl(deps.s3PublicBaseUrl, ad.imageKey);
-        const outcomeEmbed = buildReviewOutcomeEmbed(
-          {
-            id: ad.id,
-            slot: ad.slot,
-            title: ad.title,
-            body: ad.body,
-            linkUrl: ad.linkUrl,
-            ...(imageUrl ? { imageUrl } : {}),
-          },
-          { id: ad.sponsorId },
-          'rejected',
-          reviewerId,
-          reason,
-        );
-        await deps.rest.editMessage(deps.reviewChannelId, ad.reviewMessageId, {
-          embeds: [outcomeEmbed],
-          components: [],
-        });
-      } catch (err) {
-        console.error('review-reject: embed edit failed (continuing)', err);
-      }
-    }
+  const imageUrl = buildPublicImageUrl(deps.s3PublicBaseUrl, ad.imageKey);
+  const outcomeEmbed = buildReviewOutcomeEmbed(
+    {
+      id: ad.id,
+      slot: ad.slot,
+      title: ad.title,
+      body: ad.body,
+      linkUrl: ad.linkUrl,
+      ...(imageUrl ? { imageUrl } : {}),
+    },
+    { id: ad.sponsorId ?? '' },
+    'rejected',
+    reviewerId,
+    reason,
+  );
 
+  // DM + fallback channel can blow past Discord's 3s window (we logged 5s+
+  // wallTimes). Defer them so the response returns immediately. Tests omit
+  // waitUntil and the work is awaited inline. The source-message edit is NOT
+  // done here anymore — the type-7 response above owns it.
+  const deferred = async () => {
     if (!ad.sponsorId) return;
     try {
       const dmResult = await sendResultDM({
@@ -220,7 +217,7 @@ export async function runRejectModal(
     await deferred();
   }
 
-  return ephemeral(c, '✅ 却下を確定しました。通知は別途送信します。');
+  return updateMessage(c, { embeds: [outcomeEmbed], components: [] });
 }
 
 /**

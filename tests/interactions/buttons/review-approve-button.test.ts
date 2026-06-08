@@ -143,12 +143,18 @@ describe('runApproveButton', () => {
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { type: number; data: { content: string; flags: number } };
-    expect(json.type).toBe(4);
-    expect(json.data.flags).toBe(64);
-    expect(json.data.content).toContain('承認を確定');
-    expect(json.data.content).toContain('weight=7');
-    expect(json.data.content).toContain('通知は別途送信します');
+    const json = (await res.json()) as {
+      type: number;
+      data: { embeds: Array<{ title?: string }>; components: unknown[] };
+    };
+    // The source review message is edited via the interaction RESPONSE
+    // (UPDATE_MESSAGE / type 7): components cleared + outcome embed shown.
+    expect(json.type).toBe(7);
+    expect(json.data.components).toEqual([]);
+    expect(json.data.embeds).toHaveLength(1);
+    // The outcome embed reflects an approval (✅ 承認済 by the reviewer).
+    expect(json.data.embeds[0]?.title).toContain('承認済');
+    expect(json.data.embeds[0]?.title).toContain('reviewer-1');
 
     // Snapshot SELECT — non-JOIN form on ads, includes review_message_id column.
     const snapshotQ = captured.find(
@@ -182,16 +188,9 @@ describe('runApproveButton', () => {
     expect(logInsert).toBeDefined();
     expect(logInsert?.params).toEqual([AD_ID, 'reviewer-1', 'approved', null]);
 
-    // editMessage called with empty components and one outcome embed.
-    expect(rest.editMessage).toHaveBeenCalledTimes(1);
-    expect(rest.editMessage).toHaveBeenCalledWith(
-      'review-chan',
-      'review-msg-1',
-      expect.objectContaining({
-        embeds: expect.any(Array),
-        components: [],
-      }),
-    );
+    // The source message edit is now done by the type-7 interaction response,
+    // NOT by a deferred editMessage REST call — so editMessage must not run.
+    expect(rest.editMessage).not.toHaveBeenCalled();
 
     // DM sent: createDmChannel + createMessage with approve embed.
     expect(rest.createDmChannel).toHaveBeenCalledWith('sponsor-1');
@@ -242,13 +241,16 @@ describe('runApproveButton', () => {
       }),
     });
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
-    const json = (await res.json()) as { type: number; data: { content: string } };
-    expect(json.type).toBe(4);
-    expect(json.data.content).toContain('承認を確定');
-    // The ack message is generic ("通知は別途送信します") because DM + fallback
-    // work is deferred past the interaction ack; the fallback side effects below
-    // verify the blocked-DM path still ran.
-    expect(json.data.content).toContain('通知は別途送信します');
+    const json = (await res.json()) as {
+      type: number;
+      data: { embeds: Array<{ title?: string }>; components: unknown[] };
+    };
+    // Approve still succeeds: type-7 response clears buttons + shows the
+    // approved outcome embed. DM + fallback run in the deferred phase, verified
+    // by the side effects below.
+    expect(json.type).toBe(7);
+    expect(json.data.components).toEqual([]);
+    expect(json.data.embeds[0]?.title).toContain('承認済');
 
     // DM was attempted but createMessage on the DM channel never happened — instead
     // createGuildChannel + createMessage on the new private channel did.
@@ -299,12 +301,15 @@ describe('runApproveButton', () => {
       }),
     });
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
-    const json = (await res.json()) as { type: number; data: { content: string } };
-    expect(json.type).toBe(4);
-    expect(json.data.content).toContain('承認を確定');
-    // The ack message is generic ("通知は別途送信します") because DM + fallback
-    // work is deferred; the failed-fallback side effects below verify the path ran.
-    expect(json.data.content).toContain('通知は別途送信します');
+    const json = (await res.json()) as {
+      type: number;
+      data: { embeds: Array<{ title?: string }>; components: unknown[] };
+    };
+    // Approve still succeeds (type-7, buttons cleared, approved embed) even
+    // when the deferred DM + fallback both fail (console.error'd below).
+    expect(json.type).toBe(7);
+    expect(json.data.components).toEqual([]);
+    expect(json.data.embeds[0]?.title).toContain('承認済');
     // No fallback INSERT, only the original dm 'failed' UPDATE.
     expect(captured.find((c) => /INSERT INTO dm_fallback_channels/.test(c.sql))).toBeUndefined();
     const dmUpdates = captured.filter((c) => /dm_delivery_status/.test(c.sql));
@@ -385,7 +390,10 @@ describe('runApproveButton', () => {
     expect(rest.editMessage).not.toHaveBeenCalled();
   });
 
-  it('still returns success when embed edit fails (best-effort)', async () => {
+  it('does not use a deferred editMessage to clear buttons (type-7 owns the edit)', async () => {
+    // The source-message edit moved to the interaction RESPONSE (type 7); the
+    // deferred path no longer calls editMessage at all. Even if a stray
+    // editMessage were to throw, the approve must still succeed via type 7.
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
       { rows: [adRow] }, // snapshot
@@ -402,13 +410,21 @@ describe('runApproveButton', () => {
       }),
     });
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
-    const json = (await res.json()) as { type: number; data: { content: string } };
-    expect(json.type).toBe(4);
-    expect(json.data.content).toContain('承認を確定');
-    expect(json.data.content).toContain('weight=7');
+    const json = (await res.json()) as {
+      type: number;
+      data: { embeds: Array<{ title?: string }>; components: unknown[] };
+    };
+    expect(json.type).toBe(7);
+    expect(json.data.components).toEqual([]);
+    expect(json.data.embeds[0]?.title).toContain('承認済');
+    // No deferred editMessage REST call is made anymore.
+    expect(rest.editMessage).not.toHaveBeenCalled();
   });
 
-  it('skips embed edit when review_message_id is missing', async () => {
+  it('clears buttons via type 7 even when review_message_id is missing', async () => {
+    // The interaction targets the clicked message directly, so the type-7
+    // response clears its buttons regardless of the stored review_message_id;
+    // no separate editMessage REST hop is needed.
     const persistedStartsAt = new Date('2026-05-09T12:34:56.000Z');
     const client = mockClient([
       { rows: [{ ...adRow, review_message_id: null }] }, // snapshot
@@ -421,9 +437,13 @@ describe('runApproveButton', () => {
     ]);
     const rest = mockRest();
     const res = await invoke(buildPayload(), defaultDeps(client, rest));
-    const json = (await res.json()) as { type: number; data: { content: string } };
-    expect(json.type).toBe(4);
-    expect(json.data.content).toContain('承認を確定');
+    const json = (await res.json()) as {
+      type: number;
+      data: { embeds: Array<{ title?: string }>; components: unknown[] };
+    };
+    expect(json.type).toBe(7);
+    expect(json.data.components).toEqual([]);
+    expect(json.data.embeds[0]?.title).toContain('承認済');
     expect(rest.editMessage).not.toHaveBeenCalled();
   });
 });
