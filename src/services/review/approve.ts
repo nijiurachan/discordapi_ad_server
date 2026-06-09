@@ -80,22 +80,55 @@ export async function approveAd(
   if (outcome === 'budget_exceeded') return { ok: false, reason: 'budget_exceeded' };
   if (outcome === 'race') return { ok: false, reason: 'race' };
 
-  // Now approved: derive + persist effective deck weights for the whole sponsor
-  // so the newly approved banner and its siblings stay consistent. S <= T here
-  // (the guard held), so no pause; we still call applyEffectiveWeights for the
-  // single source of truth shared with the cron.
-  const allocs = await getSponsorActiveRegularAllocs(client, lookup.sponsorId);
-  const eff = effectiveWeights(allocs, lookup.weight);
-  await applyEffectiveWeights(client, eff.weights, eff.paused);
-  const mine = eff.weights.find((w) => w.id === adId);
-  const weightSnapshot = mine?.weightSnapshot ?? 0;
+  // The flip pending->approved is now COMMITTED. D1/SQLite has no interactive
+  // transactions or rollback, so we can no longer "undo" this write. Every
+  // post-flip side effect must therefore be best-effort: a throw here must NOT
+  // propagate, or the button handler would never send its success response and
+  // the 承認/却下 buttons would stay stuck on the message (a re-click would then
+  // hit 'race'). So we always fall through to `return { ok: true, ... }`.
+  let weightSnapshot = lookup.weightAlloc ?? 0;
+  let startsAt = new Date();
 
-  const startsRes = await client.query<{ starts_at: Date }>(
-    'SELECT starts_at FROM ads WHERE id = ?',
-    [adId],
-  );
-  const startsAt = startsRes.rows[0]?.starts_at ?? new Date();
+  // 1) Derive + persist effective deck weights for the whole sponsor so the newly
+  // approved banner and its siblings stay consistent. S <= T here (the guard
+  // held), so no pause; this is the single source of truth shared with the cron.
+  // If it throws, fall back to writing THIS ad's own alloc as its snapshot so it
+  // still serves (the budget guard already ensured the alloc fits; the nightly
+  // cron reconciles the siblings).
+  try {
+    const allocs = await getSponsorActiveRegularAllocs(client, lookup.sponsorId);
+    const eff = effectiveWeights(allocs, lookup.weight);
+    await applyEffectiveWeights(client, eff.weights, eff.paused);
+    const mine = eff.weights.find((w) => w.id === adId);
+    weightSnapshot = mine?.weightSnapshot ?? weightSnapshot;
+  } catch (err) {
+    console.error('approveAd: effective-weight recompute failed; falling back', adId, err);
+    weightSnapshot = lookup.weightAlloc ?? 0;
+    try {
+      await client.query('UPDATE ads SET weight_snapshot = ? WHERE id = ?', [weightSnapshot, adId]);
+    } catch (err2) {
+      console.error('approveAd: fallback weight_snapshot write failed', adId, err2);
+    }
+  }
 
-  await insertReviewLog(client, adId, reviewerId, 'approved', null);
+  // 2) Read back the persisted starts_at so the caller doesn't drift from the wall
+  // clock (best-effort; fall back to the default `startsAt` above).
+  try {
+    const startsRes = await client.query<{ starts_at: Date }>(
+      'SELECT starts_at FROM ads WHERE id = ?',
+      [adId],
+    );
+    startsAt = startsRes.rows[0]?.starts_at ?? startsAt;
+  } catch (err) {
+    console.error('approveAd: SELECT starts_at failed; using default', adId, err);
+  }
+
+  // 3) Review log (best-effort): a missing audit row must not strand the buttons.
+  try {
+    await insertReviewLog(client, adId, reviewerId, 'approved', null);
+  } catch (err) {
+    console.error('approveAd: insertReviewLog failed (ad already approved)', adId, err);
+  }
+
   return { ok: true, weightSnapshot, startsAt };
 }

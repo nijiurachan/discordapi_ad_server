@@ -4,15 +4,34 @@ import { approveAd } from '../../../src/services/review/approve.ts';
 
 type CapturedCall = { sql: string; params: unknown[] | undefined };
 
-function mockClient(
-  responses: Array<{ rows: unknown[]; rowCount?: number }>,
-  captured: CapturedCall[] = [],
-): PgClient {
-  let i = 0;
+// A response can optionally carry a throw matcher: when the issued SQL matches,
+// that query() call rejects (simulating a D1 failure mid side-effect). Throwing
+// is keyed off the SQL pattern (not the positional index) so a thrown side
+// effect doesn't desync the canned-response cursor for the calls that still run
+// after it.
+//   - `throwOn`:   rejects on EVERY matching call.
+//   - `throwOnce`: rejects only on the FIRST matching call (so a guarded retry /
+//                  fallback that issues the same SQL is allowed through).
+type MockResponse = { rows: unknown[]; rowCount?: number; throwOn?: RegExp; throwOnce?: RegExp };
+
+function mockClient(responses: MockResponse[], captured: CapturedCall[] = []): PgClient {
+  const always = responses.filter((r) => r.throwOn).map((r) => r.throwOn as RegExp);
+  const once = responses.filter((r) => r.throwOnce).map((r) => r.throwOnce as RegExp);
+  const onceFired = new Set<RegExp>();
+  const canned = responses.filter((r) => !r.throwOn && !r.throwOnce);
+  let j = 0;
   return {
     query: vi.fn(async (sql: string, params?: unknown[]) => {
       captured.push({ sql, params });
-      const r = responses[i++];
+      if (always.some((re) => re.test(sql))) {
+        throw new Error(`mock D1 failure on: ${sql.slice(0, 40)}`);
+      }
+      const onceMatch = once.find((re) => !onceFired.has(re) && re.test(sql));
+      if (onceMatch) {
+        onceFired.add(onceMatch);
+        throw new Error(`mock D1 failure (once) on: ${sql.slice(0, 40)}`);
+      }
+      const r = canned[j++];
       if (!r) return { rows: [], rowCount: 0 };
       return { rowCount: r.rowCount ?? r.rows.length, ...r };
     }) as unknown as PgClient['query'],
@@ -165,5 +184,69 @@ describe('approveAd', () => {
     );
     const result = await approveAd(client, AD_ID, REVIEWER_ID);
     expect(result).toEqual({ ok: false, reason: 'budget_exceeded' });
+  });
+
+  // Regression: the status flip pending->approved is already committed (D1 has no
+  // rollback), so a failing post-flip side effect must NOT reject — otherwise the
+  // button handler never clears the 承認/却下 buttons and a re-click hits 'race'.
+  it('(a) recompute throws after flip succeeds: still ok:true, logs the review, and writes a fallback weight_snapshot', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7, weight_alloc: 7 }] }, // lookup
+        { rows: [], rowCount: 1 }, // atomic approve UPDATE (committed)
+        { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+        // The effective-weight write throws (simulates a D1 failure mid recompute).
+        // The fallback UPDATE shares this SQL but is in its own try/catch, so the
+        // 2nd matching call is allowed through below via throwOnce.
+        { rows: [{ starts_at: new Date('2026-05-09T12:34:56.000Z') }] }, // SELECT starts_at
+        { rows: [] }, // INSERT review_logs
+        { rows: [], throwOnce: /UPDATE ads SET weight_snapshot = \?/ },
+      ],
+      captured,
+    );
+    const result = await approveAd(client, AD_ID, REVIEWER_ID);
+
+    // Must resolve ok:true (does NOT reject) so the buttons get cleared.
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Fallback writes this ad's own alloc as its snapshot.
+      expect(result.weightSnapshot).toBe(7);
+      expect(result.startsAt).toBeInstanceOf(Date);
+    }
+
+    // review_logs INSERT was still issued (best-effort, must run).
+    const logInsert = captured.find((c) => /INSERT INTO review_logs/.test(c.sql));
+    expect(logInsert).toBeDefined();
+    expect(logInsert?.params).toEqual([AD_ID, REVIEWER_ID, 'approved', null]);
+
+    // A fallback `UPDATE ads SET weight_snapshot = ?` with this ad's weight_alloc
+    // (and id) was issued so the banner still serves. (The first such write — from
+    // applyEffectiveWeights — threw; this is the guarded fallback that followed.)
+    const weightWrites = captured.filter((c) => /UPDATE ads SET weight_snapshot = \?/.test(c.sql));
+    expect(weightWrites.length).toBeGreaterThanOrEqual(2);
+    const fallbackWrite = weightWrites[weightWrites.length - 1];
+    expect(fallbackWrite?.params).toEqual([7, AD_ID]);
+  });
+
+  it('(b) insertReviewLog throws after flip succeeds: still resolves ok:true', async () => {
+    const captured: CapturedCall[] = [];
+    const client = mockClient(
+      [
+        { rows: [{ sponsor_id: 'sponsor-1', status: 'pending', weight: 7, weight_alloc: 7 }] }, // lookup
+        { rows: [], rowCount: 1 }, // atomic approve UPDATE (committed)
+        { rows: [{ id: AD_ID, weight_alloc: 7 }] }, // getSponsorActiveRegularAllocs
+        { rows: [] }, // applyEffectiveWeights UPDATE
+        { rows: [{ starts_at: new Date('2026-05-09T12:34:56.000Z') }] }, // SELECT starts_at
+        { rows: [], throwOn: /INSERT INTO review_logs/ }, // insertReviewLog throws
+      ],
+      captured,
+    );
+    const result = await approveAd(client, AD_ID, REVIEWER_ID);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.weightSnapshot).toBe(7);
+      expect(result.startsAt).toBeInstanceOf(Date);
+    }
   });
 });
